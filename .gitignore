@@ -1,0 +1,20 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+*.log
+dist/
+build/
+coverage/
+.nyc_output/
+data/*
+!data/.gitkeep
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+ANALYSIS.md
+owner manual.txt

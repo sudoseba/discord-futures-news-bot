@@ -1,0 +1,50 @@
+{
+  "name": "discord-futures-news-bot",
+  "version": "2.0.0",
+  "description": "AI-powered Discord bot for futures market news, technical analysis, anomaly detection, and signal-quality backtesting",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "dev": "node --watch src/index.js",
+    "test": "node ./node_modules/vitest/vitest.mjs run",
+    "test:watch": "node ./node_modules/vitest/vitest.mjs",
+    "test:coverage": "node ./node_modules/vitest/vitest.mjs run --coverage",
+    "backup": "node -e \"require('./src/services/database').initDatabase(); require('./src/services/database').backupDatabase();\""
+  },
+  "keywords": [
+    "discord",
+    "discord-bot",
+    "futures",
+    "trading",
+    "news",
+    "technical-analysis",
+    "divergence",
+    "anomaly-detection",
+    "ai",
+    "llm"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@cerebras/cerebras_cloud_sdk": "^1.64.1",
+    "@discordjs/rest": "^2.6.0",
+    "axios": "^1.13.5",
+    "axios-retry": "^4.5.0",
+    "better-sqlite3": "^12.6.2",
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.3.1",
+    "groq-sdk": "^0.37.0",
+    "node-cron": "^4.2.1",
+    "pino": "^9.14.0",
+    "pino-pretty": "^11.3.0",
+    "rss-parser": "^3.13.0",
+    "technicalindicators": "^3.1.0",
+    "yahoo-finance2": "^3.13.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
+  }
+}

@@ -1,0 +1,19 @@
+services:
+  bot:
+    build: .
+    container_name: discord_news_bot
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      TZ: ${SCHEDULE_TIMEZONE:-America/New_York}
+    ports:
+      - "127.0.0.1:3000:3000"   # /healthz endpoint, bound to localhost only
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

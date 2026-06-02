@@ -1,0 +1,16 @@
+node_modules/
+.git/
+.gitignore
+.github/
+.env
+.env.local
+.env.*.local
+data/
+*.log
+coverage/
+.vscode/
+.idea/
+ANALYSIS.md
+tests/
+docs/
+npm-debug.log*
