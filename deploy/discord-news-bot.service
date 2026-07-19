@@ -1,0 +1,47 @@
+# systemd unit for the Discord News Bot.
+#
+# This is a TEMPLATE — the placeholders __USER__, __DIR__ and __NODE__
+# are filled in by deploy/install-service.sh. You normally never edit
+# this file directly; run the installer instead:
+#
+#     bash deploy/install-service.sh
+#
+# ...which writes the rendered unit to /etc/systemd/system/discord-news-bot.service
+#
+# Manage it with:  sudo systemctl {start,stop,restart,status} discord-news-bot
+#          logs:   journalctl -u discord-news-bot -f
+#     or simply:   node admin-panel.js   (menu → Bot control)
+
+[Unit]
+Description=Discord Futures News Bot
+Documentation=file:__DIR__/docs/RUNBOOK.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__NODE__ src/index.js
+
+# The app loads .env itself via dotenv; this line also exposes those
+# vars to systemd. The leading "-" means "don't fail if .env is absent".
+EnvironmentFile=-__DIR__/.env
+Environment=NODE_ENV=production
+Environment=LOG_PRETTY=false
+
+# Restart on crash, but not if it exits cleanly (e.g. a config error that
+# would just crash-loop). Give the app time to flush the SQLite WAL and
+# disconnect Discord on stop (shutdown() targets < 6s).
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+# Logs go to the journal → journalctl -u discord-news-bot
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=discord-news-bot
+
+[Install]
+WantedBy=multi-user.target

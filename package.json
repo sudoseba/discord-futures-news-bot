@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "admin": "node admin-panel.js",
     "deploy": "node src/deploy-commands.js",
     "dev": "node --watch src/index.js",
     "test": "node ./node_modules/vitest/vitest.mjs run",
