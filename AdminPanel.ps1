@@ -601,7 +601,7 @@ $tabBot.Text = '  Bot Control  '
 $tabs.TabPages.Add($tabBot)
 
 $bTop = New-Object System.Windows.Forms.Panel
-$bTop.Dock = 'Top'; $bTop.Height = 96
+$bTop.Dock = 'Top'; $bTop.Height = 132
 $tabBot.Controls.Add($bTop)
 
 function New-BotButton($text,$x,$y,$w) {
@@ -625,6 +625,60 @@ $chkAuto.Location = New-Object System.Drawing.Point(262,56)
 $bTop.Controls.Add($chkAuto)
 
 $btnRefresh = New-BotButton 'Refresh Log' 400 50 100
+
+# ─── Web dashboard controls (separate service; local process on Windows) ──────
+$WebDir     = Join-Path $ProjectDir 'web'
+$WebPidFile = Join-Path $ProjectDir '.adminpanel-web.pid'
+function Get-WebUrl {
+    $we = Join-Path $WebDir '.env'
+    $port = '8080'; $url = ''
+    if (Test-Path $we) {
+        $lines = Get-Content $we
+        foreach ($l in $lines) {
+            if ($l -match '^\s*WEB_PORT\s*=\s*(\d+)')       { $port = $Matches[1] }
+            if ($l -match '^\s*WEB_PUBLIC_URL\s*=\s*(\S+)')  { $url  = $Matches[1] }
+        }
+    }
+    if (-not $url) { $url = "http://localhost:$port" }
+    return $url
+}
+$btnWebStart = New-BotButton 'Start Web UI'  12  90 110
+$btnWebStop  = New-BotButton 'Stop Web UI'  128  90 110
+$btnWebOpen  = New-BotButton 'Open Web UI'  244  90 110
+
+$btnWebStart.Add_Click({
+    if (-not (Test-Path (Join-Path $WebDir 'node_modules'))) {
+        [System.Windows.Forms.MessageBox]::Show("Web dependencies not installed.`n`nIn a terminal:`n  cd web`n  npm ci --omit=dev`n  copy .env.example .env", 'Web dashboard', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if (-not (Test-Path (Join-Path $WebDir '.env'))) {
+        [System.Windows.Forms.MessageBox]::Show("web\.env is missing. Copy web\.env.example to web\.env and set SESSION_SECRET.", 'Web dashboard', 'OK', 'Warning') | Out-Null
+        return
+    }
+    try {
+        if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+        $wout = Join-Path $LogDir 'web.out.log'; $werr = Join-Path $LogDir 'web.err.log'
+        $proc = Start-Process -FilePath 'node' -ArgumentList 'src/index.js' -WorkingDirectory $WebDir `
+                    -RedirectStandardOutput $wout -RedirectStandardError $werr -WindowStyle Hidden -PassThru
+        Set-Content -Path $WebPidFile -Value $proc.Id
+        Set-Status "Web dashboard started (PID $($proc.Id)) - open $(Get-WebUrl)"
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("Failed to start web dashboard:`n$($_.Exception.Message)`n`nIs Node.js on PATH?", 'Error', 'OK', 'Error') | Out-Null
+    }
+})
+$btnWebStop.Add_Click({
+    if (-not (Test-Path $WebPidFile)) { Set-Status 'No web dashboard PID tracked by this panel.'; return }
+    try {
+        $procId = [int](Get-Content $WebPidFile -Raw).Trim()
+        Stop-Process -Id $procId -Force -ErrorAction Stop
+        Remove-Item $WebPidFile -Force -ErrorAction SilentlyContinue
+        Set-Status "Web dashboard stopped (PID $procId)"
+    } catch {
+        Remove-Item $WebPidFile -Force -ErrorAction SilentlyContinue
+        Set-Status "Web stop: $($_.Exception.Message)"
+    }
+})
+$btnWebOpen.Add_Click({ try { Start-Process (Get-WebUrl) } catch { Set-Status "Open failed: $($_.Exception.Message)" } })
 
 $botStatus = New-Object System.Windows.Forms.Label
 $botStatus.Dock = 'Top'; $botStatus.Height = 26; $botStatus.TextAlign = 'MiddleLeft'

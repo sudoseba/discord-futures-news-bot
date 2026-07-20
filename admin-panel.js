@@ -44,6 +44,8 @@ const OUT_LOG = path.join(LOG_DIR, 'bot.out.log');
 const ERR_LOG = path.join(LOG_DIR, 'bot.err.log');
 const PID_FILE = path.join(PROJECT_DIR, '.adminpanel-bot.pid');
 const SERVICE = process.env.BOT_SERVICE || 'discord-news-bot';
+const WEB_SERVICE = process.env.WEB_SERVICE || 'discord-web-dashboard';
+const WEB_DIR = path.join(PROJECT_DIR, 'web');
 
 let VERSION = '2.0.0';
 try {
@@ -445,6 +447,66 @@ async function healthzCheck() {
   return { port, r, json: r.body ? parseJson(r.body) : null };
 }
 
+// ─── Web dashboard (separate systemd service) control ─────────────
+function webInstalled() {
+  if (!HAS_SYSTEMD) return false;
+  return spawnSync('systemctl', ['cat', `${WEB_SERVICE}.service`], { stdio: 'ignore' }).status === 0;
+}
+function webEnvVal(key, def) {
+  try {
+    const m = fs.readFileSync(path.join(WEB_DIR, '.env'), 'utf8').match(new RegExp('^\\s*' + key + '\\s*=\\s*(\\S+)', 'm'));
+    if (m) return m[1];
+  } catch { /* no web/.env */ }
+  return def;
+}
+function webPort() { return webEnvVal('WEB_PORT', '8080'); }
+function webPublicUrl() { return webEnvVal('WEB_PUBLIC_URL', `http://localhost:${webPort()}`); }
+
+async function webLivez() {
+  const r = await httpRequest({ url: `http://127.0.0.1:${webPort()}/livez`, timeoutMs: 4000 });
+  return { ok: r.ok, r };
+}
+
+function webControl(action) {
+  if (!HAS_SYSTEMD) { console.log(yellow('systemd not available on this host.')); return false; }
+  if (!webInstalled()) {
+    console.log(yellow(`Web dashboard service (${WEB_SERVICE}) is not installed.`));
+    if (!fs.existsSync(path.join(WEB_DIR, 'node_modules'))) console.log(dim('  First:   cd web && npm ci --omit=dev && cp .env.example .env'));
+    console.log(dim('  Install: bash web/deploy/install-web-service.sh --start'));
+    return false;
+  }
+  console.log(cyan(`${action} ${WEB_SERVICE} via systemd...`));
+  return sysctl([action, WEB_SERVICE]).status === 0;
+}
+
+async function printWebStatus() {
+  console.log(bold('\nWeb dashboard status'));
+  console.log(dim('─'.repeat(60)));
+  if (!HAS_SYSTEMD) {
+    console.log('  systemd     : not available (this panel targets the Pi)');
+  } else if (!webInstalled()) {
+    console.log(`  service     : ${yellow('not installed')} (${WEB_SERVICE})`);
+    console.log(dim('  install     : bash web/deploy/install-web-service.sh --start'));
+  } else {
+    const active = (sysctl(['is-active', WEB_SERVICE], false).stdout || '').trim() || 'unknown';
+    const enabled = (sysctl(['is-enabled', WEB_SERVICE], false).stdout || '').trim();
+    console.log(`  service     : ${WEB_SERVICE}`);
+    console.log(`  active      : ${active === 'active' ? green(active) : red(active)}`);
+    console.log(`  boot-enabled: ${enabled === 'enabled' ? green(enabled) : yellow(enabled || 'no')}`);
+  }
+  const { ok } = await webLivez();
+  if (ok) console.log(`  /livez      : ${green('responding')} → ${webPublicUrl()}`);
+  else console.log(`  /livez      : ${red('no response')} on http://127.0.0.1:${webPort()}/livez`);
+  console.log(dim('─'.repeat(60)));
+}
+
+function webLogs(lines = 200) {
+  if (!webInstalled()) { console.log(dim('web dashboard service not installed')); return; }
+  console.log(cyan(`Last ${lines} journal lines for ${WEB_SERVICE}:\n`));
+  const cmd = [...SUDO, 'journalctl', '-u', WEB_SERVICE, '-n', String(lines), '--no-pager'];
+  spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+}
+
 // Start ------------------------------------------------------------
 function startBot() {
   if (SERVICE_MODE) {
@@ -606,17 +668,19 @@ async function mainMenu() {
     console.log('   1) Settings          view / edit .env');
     console.log('   2) API health        test keys & free sources');
     console.log('   3) Bot control       start / stop / restart / status');
-    console.log('   4) Check /healthz');
-    console.log('   5) Logs');
-    console.log('   6) Register slash commands (deploy)');
+    console.log('   4) Web dashboard     start / stop / restart / status');
+    console.log('   5) Check /healthz');
+    console.log('   6) Logs');
+    console.log('   7) Register slash commands (deploy)');
     console.log('   q) Quit');
     const a = (await ask('\n  > ')).trim().toLowerCase();
     if (a === '1') await settingsMenu();
     else if (a === '2') await healthMenu();
     else if (a === '3') await controlMenu();
-    else if (a === '4') { const { port, json, r } = await healthzCheck(); printHealthz(port, json, r); await ask(dim('\n  (enter to continue) ')); }
-    else if (a === '5') await logsMenu();
-    else if (a === '6') { deployCommands(); await ask(dim('\n  (enter to continue) ')); }
+    else if (a === '4') await webMenu();
+    else if (a === '5') { const { port, json, r } = await healthzCheck(); printHealthz(port, json, r); await ask(dim('\n  (enter to continue) ')); }
+    else if (a === '6') await logsMenu();
+    else if (a === '7') { deployCommands(); await ask(dim('\n  (enter to continue) ')); }
     else if (a === 'q' || a === 'quit' || a === 'exit') break;
   }
   rl.close();
@@ -733,6 +797,21 @@ async function controlMenu() {
   }
 }
 
+async function webMenu() {
+  for (;;) {
+    await printWebStatus();
+    console.log('   1) Start     2) Stop     3) Restart     4) Logs     5) Refresh     b) Back');
+    const a = (await ask('\n  > ')).trim().toLowerCase();
+    if (a === 'b' || a === '') return;
+    if (a === '1') webControl('start');
+    else if (a === '2') webControl('stop');
+    else if (a === '3') webControl('restart');
+    else if (a === '4') { webLogs(200); await ask(dim('\n  (enter to continue) ')); }
+    else if (a === '5') { /* loop reprints status */ }
+    else console.log(red('  Not a valid choice.'));
+  }
+}
+
 async function logsMenu() {
   console.log('\n' + bold('  Logs'));
   console.log('   1) Show last 200 lines     2) Follow (Ctrl-C to stop)     b) Back');
@@ -767,7 +846,8 @@ One-shot subcommands:
   status                              service + /healthz summary
   health                              print /healthz JSON view
   start | stop | restart              control the bot
-  logs [--follow|-f] [N]              show (or follow) logs
+  web <status|start|stop|restart|logs>  control the web dashboard service
+  logs [--follow|-f] [N]              show (or follow) bot logs
   test <api> | test-all              run API connectivity tests
   deploy                              register slash commands
   get <KEY>                           print one .env value
@@ -775,7 +855,7 @@ One-shot subcommands:
 
 APIs: ${APIS.filter((a) => a.kind !== 'note').map((a) => a.id).join(', ')}
 
-Env overrides: BOT_SERVICE (systemd unit name, default "${SERVICE}")`);
+Env overrides: BOT_SERVICE ("${SERVICE}"), WEB_SERVICE ("${WEB_SERVICE}")`);
 }
 
 async function cli(argv) {
@@ -818,6 +898,18 @@ async function cli(argv) {
       VALUES[key] = val;
       saveEnv();
       console.log(green(`Set ${key} in .env (backup: .env.bak). Restart the bot to apply.`));
+      break;
+    }
+    case 'web': {
+      const action = rest[0] || 'status';
+      if (action === 'status') await printWebStatus();
+      else if (['start', 'stop', 'restart'].includes(action)) webControl(action);
+      else if (action === 'logs') {
+        if (rest.includes('-f') || rest.includes('--follow')) {
+          const cmd = [...SUDO, 'journalctl', '-u', WEB_SERVICE, '-f', '-n', '50', '--no-pager'];
+          spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+        } else webLogs(200);
+      } else { console.log(red('usage: web <status|start|stop|restart|logs>')); process.exitCode = 1; }
       break;
     }
     case '-h': case '--help': case 'help': usage(); break;
