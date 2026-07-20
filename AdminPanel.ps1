@@ -59,9 +59,14 @@ $Schema = @(
     @{ Key='CEREBRAS_API_KEY';       Label='Cerebras Key';       Cat='AI & Voice';    Type='secret'; Hint='cloud.cerebras.ai - the ONLY LLM the bot uses' }
     @{ Key='CEREBRAS_MODEL';         Label='Cerebras Model';     Cat='AI & Voice';    Type='text';   Default='gpt-oss-120b'; Hint='Default: gpt-oss-120b' }
     @{ Key='DEEPGRAM_TTS_API_KEY';   Label='Deepgram TTS Key';   Cat='AI & Voice';    Type='secret'; Hint='deepgram.com - recap voice audio (opt-in)' }
+    @{ Key='GROQ_API_KEY';           Label='Groq Key';           Cat='AI & Voice';    Type='secret'; Hint='groq.com - automatic failover for Cerebras' }
+    @{ Key='GROQ_MODEL';             Label='Groq Model';         Cat='AI & Voice';    Type='text';   Default='llama-3.3-70b-versatile'; Hint='Groq failover model' }
 
     @{ Key='ALPHA_VANTAGE_API_KEY';  Label='Alpha Vantage Key';  Cat='Market Data';   Type='secret'; Hint='alphavantage.co - weekly candle fallback' }
-    @{ Key='MASSIVE_API_KEY';        Label='Massive Key';        Cat='Market Data';   Type='secret'; Hint='massive.com - declared but NOT used by bot code' }
+    @{ Key='MASSIVE_API_KEY';        Label='Massive Key';        Cat='Market Data';   Type='secret'; Hint='massive.com - quotes/candles fallback (real volume + VWAP)' }
+    @{ Key='TWELVEDATA_API_KEY';     Label='Twelve Data Key';    Cat='Market Data';   Type='secret'; Hint='twelvedata.com - FX/metals/crypto/stocks fallback' }
+    @{ Key='EXCHANGERATE_API_KEY';   Label='ExchangeRate Key';   Cat='Market Data';   Type='secret'; Hint='exchangerate-api.com - FX reference rates' }
+    @{ Key='LUNARCRUSH_API_KEY';     Label='LunarCrush Key';     Cat='Market Data';   Type='secret'; Hint='lunarcrush.com - crypto social (needs paid tier)' }
 
     @{ Key='SCHEDULE_TIMEZONE';      Label='Timezone';           Cat='Schedules';     Type='text';   Default='America/New_York'; Hint='IANA tz, e.g. America/New_York' }
     @{ Key='BRIEFING_CRON';          Label='Morning Briefing';   Cat='Schedules';     Type='text';   Hint='cron, e.g. 0 8 * * 1-5' }
@@ -94,7 +99,12 @@ $Apis = @(
     @{ Id='stooq';        Name='Stooq (no key)';             Kind='free' }
     @{ Id='coingecko';    Name='CoinGecko (no key)';         Kind='free' }
     @{ Id='altme';        Name='Alternative.me F&G (no key)';Kind='free' }
-    @{ Id='massive';      Name='Massive.com';                Kind='note' }
+    @{ Id='massive';      Name='Massive.com';                Kind='key'  }
+    @{ Id='twelvedata';   Name='Twelve Data';                Kind='key'  }
+    @{ Id='exchangerate'; Name='ExchangeRate-API';           Kind='key'  }
+    @{ Id='groq';         Name='Groq (LLM failover)';        Kind='key'  }
+    @{ Id='lunarcrush';   Name='LunarCrush (crypto social)'; Kind='key'  }
+    @{ Id='bybit';        Name='Bybit funding (no key)';     Kind='free' }
 )
 
 $script:Controls   = @{}
@@ -307,6 +317,46 @@ function Run-ApiTest([string]$Id) {
             'altme' {
                 $r = Invoke-Http -Url 'https://api.alternative.me/fng/?limit=1'
                 if ($r.Ok) { $j = $r.Body | ConvertFrom-Json; $ok = $true; $msg = "OK - Fear&Greed $($j.data[0].value) ($($j.data[0].value_classification))" }
+                else { $msg = Describe-HttpErr $r }
+            }
+            'twelvedata' {
+                $k = Get-FieldValue 'TWELVEDATA_API_KEY'
+                if (-not $k) { $msg = 'No key set'; break }
+                $r = Invoke-Http -Url "https://api.twelvedata.com/quote?symbol=AAPL&apikey=$k"
+                if ($r.Ok) { $j = $r.Body | ConvertFrom-Json; if ($j.close) { $ok = $true; $msg = "OK - AAPL `$$($j.close)" } else { $msg = [string]$j.message } }
+                else { $msg = Describe-HttpErr $r }
+            }
+            'massive' {
+                $k = Get-FieldValue 'MASSIVE_API_KEY'
+                if (-not $k) { $msg = 'No key set'; break }
+                $r = Invoke-Http -Url "https://api.massive.com/v2/aggs/ticker/AAPL/prev?apiKey=$k"
+                if ($r.Ok) { $j = $r.Body | ConvertFrom-Json; if ($j.status -eq 'OK' -and $j.results) { $ok = $true; $msg = "OK - AAPL prev `$$($j.results[0].c)" } else { $msg = 'Unexpected response (check key/plan)' } }
+                else { $msg = Describe-HttpErr $r }
+            }
+            'exchangerate' {
+                $k = Get-FieldValue 'EXCHANGERATE_API_KEY'
+                if (-not $k) { $msg = 'No key set'; break }
+                $r = Invoke-Http -Url "https://v6.exchangerate-api.com/v6/$k/pair/EUR/USD"
+                if ($r.Ok) { $j = $r.Body | ConvertFrom-Json; if ($j.result -eq 'success') { $ok = $true; $msg = "OK - EUR/USD $($j.conversion_rate)" } else { $msg = [string]$j.'error-type' } }
+                else { $msg = Describe-HttpErr $r }
+            }
+            'groq' {
+                $k = Get-FieldValue 'GROQ_API_KEY'
+                if (-not $k) { $msg = 'No key set'; break }
+                $r = Invoke-Http -Url 'https://api.groq.com/openai/v1/models' -Headers @{ Authorization = "Bearer $k" }
+                if ($r.Ok) { $j = $r.Body | ConvertFrom-Json; $ok = $true; $msg = "OK - $(@($j.data).Count) models available" }
+                else { $msg = Describe-HttpErr $r }
+            }
+            'lunarcrush' {
+                $k = Get-FieldValue 'LUNARCRUSH_API_KEY'
+                if (-not $k) { $msg = 'No key set'; break }
+                $r = Invoke-Http -Url 'https://lunarcrush.com/api4/public/coins/BTC/v1' -Headers @{ Authorization = "Bearer $k" }
+                if ($r.Ok) { $j = $r.Body | ConvertFrom-Json; if ($j.data) { $ok = $true; $msg = 'OK - data received' } else { $msg = [string]$j.error } }
+                else { $msg = Describe-HttpErr $r }
+            }
+            'bybit' {
+                $r = Invoke-Http -Url 'https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT'
+                if ($r.Ok) { $j = $r.Body | ConvertFrom-Json; if ($j.retCode -eq 0) { $ok = $true; $msg = "OK - BTC funding $($j.result.list[0].fundingRate)" } else { $msg = [string]$j.retMsg } }
                 else { $msg = Describe-HttpErr $r }
             }
             default { $msg = 'No test defined' }

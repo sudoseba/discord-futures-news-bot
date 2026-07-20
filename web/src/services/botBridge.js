@@ -27,6 +27,7 @@ const state = { available: false, error: null, aiSdk: false };
 const svc = {};
 let botConfig = null;
 let CerebrasSDK = null;
+let botBreaker = null;
 
 try {
   botConfig = require(path.join(BOT_SRC, 'config'));
@@ -45,6 +46,7 @@ try {
   svc.ta = require(path.join(BOT_SRC, 'services', 'technicalAnalysisService'));
   svc.cot = require(path.join(BOT_SRC, 'services', 'cotReportService'));
   svc.llm = require(path.join(BOT_SRC, 'services', 'llmService'));
+  try { botBreaker = require(path.join(BOT_SRC, 'utils', 'circuitBreaker')); } catch { /* older bot */ }
 
   try {
     CerebrasSDK = require(require.resolve('@cerebras/cerebras_cloud_sdk', { paths: [BOT_ROOT] }));
@@ -65,6 +67,11 @@ function ensure() {
 }
 function aiAvailable() {
   return Boolean(state.available && state.aiSdk && botConfig && botConfig.cerebrasApiKey);
+}
+
+/** Circuit-breaker / provider health snapshot (populated as bridge calls run). */
+function providerHealth() {
+  try { return botBreaker ? botBreaker.snapshot() : []; } catch { return []; }
 }
 
 // ─── symbol resolution ──────────────────────────────────────────────────────
@@ -235,6 +242,7 @@ module.exports = {
   get available() { return state.available; },
   get error() { return state.error; },
   aiAvailable,
+  providerHealth,
   resolve,
   symbols,
   watchlist,

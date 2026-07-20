@@ -77,9 +77,14 @@ const SCHEMA = [
   { key: 'CEREBRAS_API_KEY',       label: 'Cerebras Key',       cat: 'AI & Voice',  type: 'secret', hint: 'cloud.cerebras.ai - the LLM the bot uses' },
   { key: 'CEREBRAS_MODEL',         label: 'Cerebras Model',     cat: 'AI & Voice',  type: 'text',   default: 'gpt-oss-120b', hint: 'Default: gpt-oss-120b' },
   { key: 'DEEPGRAM_TTS_API_KEY',   label: 'Deepgram TTS Key',   cat: 'AI & Voice',  type: 'secret', hint: 'deepgram.com - recap voice audio (opt-in)' },
+  { key: 'GROQ_API_KEY',           label: 'Groq Key',           cat: 'AI & Voice',  type: 'secret', hint: 'groq.com - automatic failover for Cerebras' },
+  { key: 'GROQ_MODEL',             label: 'Groq Model',         cat: 'AI & Voice',  type: 'text',   default: 'llama-3.3-70b-versatile', hint: 'Groq failover model' },
 
   { key: 'ALPHA_VANTAGE_API_KEY',  label: 'Alpha Vantage Key',  cat: 'Market Data', type: 'secret', hint: 'alphavantage.co - weekly candle fallback' },
-  { key: 'MASSIVE_API_KEY',        label: 'Massive Key',        cat: 'Market Data', type: 'secret', hint: 'massive.com - declared but NOT used by bot code' },
+  { key: 'MASSIVE_API_KEY',        label: 'Massive Key',        cat: 'Market Data', type: 'secret', hint: 'massive.com - quotes/candles fallback (real volume + VWAP)' },
+  { key: 'TWELVEDATA_API_KEY',     label: 'Twelve Data Key',    cat: 'Market Data', type: 'secret', hint: 'twelvedata.com - FX/metals/crypto/stocks fallback' },
+  { key: 'EXCHANGERATE_API_KEY',   label: 'ExchangeRate Key',   cat: 'Market Data', type: 'secret', hint: 'exchangerate-api.com - FX reference rates' },
+  { key: 'LUNARCRUSH_API_KEY',     label: 'LunarCrush Key',     cat: 'Market Data', type: 'secret', hint: 'lunarcrush.com - crypto social (needs paid tier)' },
 
   { key: 'SCHEDULE_TIMEZONE',      label: 'Timezone',           cat: 'Schedules',   type: 'text',   default: 'America/New_York', hint: 'IANA tz, e.g. America/New_York' },
   { key: 'BRIEFING_CRON',          label: 'Morning Briefing',   cat: 'Schedules',   type: 'text',   hint: 'cron, e.g. 0 8 * * 1-5' },
@@ -112,7 +117,12 @@ const APIS = [
   { id: 'stooq',        name: 'Stooq (no key)',              kind: 'free' },
   { id: 'coingecko',    name: 'CoinGecko (no key)',          kind: 'free' },
   { id: 'altme',        name: 'Alternative.me F&G (no key)', kind: 'free' },
-  { id: 'massive',      name: 'Massive.com',                 kind: 'note' },
+  { id: 'massive',      name: 'Massive.com',                 kind: 'key' },
+  { id: 'twelvedata',   name: 'Twelve Data',                 kind: 'key' },
+  { id: 'exchangerate', name: 'ExchangeRate-API',            kind: 'key' },
+  { id: 'groq',         name: 'Groq (LLM failover)',         kind: 'key' },
+  { id: 'lunarcrush',   name: 'LunarCrush (crypto social)',  kind: 'key' },
+  { id: 'bybit',        name: 'Bybit funding (no key)',      kind: 'free' },
 ];
 
 // ─── .env state ───────────────────────────────────────────────────
@@ -328,6 +338,58 @@ async function runApiTest(id) {
       case 'altme': {
         const r = await httpRequest({ url: 'https://api.alternative.me/fng/?limit=1' });
         if (r.ok) { const j = parseJson(r.body) || {}; const d = (j.data && j.data[0]) || {}; ok = true; msg = `OK - Fear&Greed ${d.value} (${d.value_classification})`; }
+        else msg = describeHttpErr(r);
+        break;
+      }
+      case 'twelvedata': {
+        const k = effective('TWELVEDATA_API_KEY');
+        if (!k) { msg = 'No key set'; break; }
+        const r = await httpRequest({ url: `https://api.twelvedata.com/quote?symbol=AAPL&apikey=${k}` });
+        const j = parseJson(r.body) || {};
+        if (r.ok && j.close) { ok = true; msg = `OK - AAPL $${j.close}`; }
+        else msg = j.message || describeHttpErr(r);
+        break;
+      }
+      case 'massive': {
+        const k = effective('MASSIVE_API_KEY');
+        if (!k) { msg = 'No key set'; break; }
+        const r = await httpRequest({ url: `https://api.massive.com/v2/aggs/ticker/AAPL/prev?apiKey=${k}` });
+        const j = parseJson(r.body) || {};
+        if (r.ok && j.status === 'OK' && j.results && j.results[0]) { ok = true; msg = `OK - AAPL prev $${j.results[0].c}`; }
+        else msg = j.message || describeHttpErr(r);
+        break;
+      }
+      case 'exchangerate': {
+        const k = effective('EXCHANGERATE_API_KEY');
+        if (!k) { msg = 'No key set'; break; }
+        const r = await httpRequest({ url: `https://v6.exchangerate-api.com/v6/${k}/pair/EUR/USD` });
+        const j = parseJson(r.body) || {};
+        if (r.ok && j.result === 'success') { ok = true; msg = `OK - EUR/USD ${j.conversion_rate}`; }
+        else msg = j['error-type'] || describeHttpErr(r);
+        break;
+      }
+      case 'groq': {
+        const k = effective('GROQ_API_KEY');
+        if (!k) { msg = 'No key set'; break; }
+        const r = await httpRequest({ url: 'https://api.groq.com/openai/v1/models', headers: { Authorization: `Bearer ${k}` } });
+        const j = parseJson(r.body) || {};
+        if (r.ok && Array.isArray(j.data)) { ok = true; msg = `OK - ${j.data.length} models available`; }
+        else msg = describeHttpErr(r);
+        break;
+      }
+      case 'lunarcrush': {
+        const k = effective('LUNARCRUSH_API_KEY');
+        if (!k) { msg = 'No key set'; break; }
+        const r = await httpRequest({ url: 'https://lunarcrush.com/api4/public/coins/BTC/v1', headers: { Authorization: `Bearer ${k}` } });
+        const j = parseJson(r.body) || {};
+        if (r.ok && j.data) { ok = true; msg = 'OK - data received'; }
+        else msg = j.error || '200 but no data (needs paid tier)';
+        break;
+      }
+      case 'bybit': {
+        const r = await httpRequest({ url: 'https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT' });
+        const j = parseJson(r.body) || {};
+        if (r.ok && j.retCode === 0) { ok = true; msg = `OK - BTC funding ${j.result?.list?.[0]?.fundingRate}`; }
         else msg = describeHttpErr(r);
         break;
       }

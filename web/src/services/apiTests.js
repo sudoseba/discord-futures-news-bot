@@ -14,9 +14,15 @@ const CATALOG = [
   { id: 'cerebras', name: 'Cerebras (AI / LLM)', kind: 'key' },
   { id: 'deepgram', name: 'Deepgram TTS', kind: 'key' },
   { id: 'alphavantage', name: 'Alpha Vantage', kind: 'key' },
+  { id: 'massive', name: 'Massive.com', kind: 'key' },
+  { id: 'twelvedata', name: 'Twelve Data', kind: 'key' },
+  { id: 'exchangerate', name: 'ExchangeRate-API', kind: 'key' },
+  { id: 'groq', name: 'Groq (LLM failover)', kind: 'key' },
+  { id: 'lunarcrush', name: 'LunarCrush (crypto social)', kind: 'key' },
   { id: 'yahoo', name: 'Yahoo Finance (no key)', kind: 'free' },
   { id: 'coingecko', name: 'CoinGecko (no key)', kind: 'free' },
   { id: 'altme', name: 'Alternative.me F&G (no key)', kind: 'free' },
+  { id: 'bybit', name: 'Bybit funding (no key)', kind: 'free' },
 ];
 
 function listCatalog() {
@@ -118,6 +124,41 @@ async function runTest(id) {
         const r = await http('https://api.alternative.me/fng/?limit=1');
         const d = r.json?.data?.[0];
         if (r.ok && d) { ok = true; msg = `OK - Fear&Greed ${d.value} (${d.value_classification})`; } else msg = err(r);
+        break;
+      }
+      case 'twelvedata': {
+        if (!env.TWELVEDATA_API_KEY) { msg = 'No key set'; break; }
+        const r = await http(`https://api.twelvedata.com/quote?symbol=AAPL&apikey=${env.TWELVEDATA_API_KEY}`);
+        if (r.ok && r.json?.close) { ok = true; msg = `OK - AAPL $${r.json.close}`; } else msg = r.json?.message || err(r);
+        break;
+      }
+      case 'massive': {
+        if (!env.MASSIVE_API_KEY) { msg = 'No key set'; break; }
+        const r = await http(`https://api.massive.com/v2/aggs/ticker/AAPL/prev?apiKey=${env.MASSIVE_API_KEY}`);
+        if (r.ok && r.json?.status === 'OK' && r.json.results?.[0]) { ok = true; msg = `OK - AAPL prev $${r.json.results[0].c}`; } else msg = r.json?.message || err(r);
+        break;
+      }
+      case 'exchangerate': {
+        if (!env.EXCHANGERATE_API_KEY) { msg = 'No key set'; break; }
+        const r = await http(`https://v6.exchangerate-api.com/v6/${env.EXCHANGERATE_API_KEY}/pair/EUR/USD`);
+        if (r.ok && r.json?.result === 'success') { ok = true; msg = `OK - EUR/USD ${r.json.conversion_rate}`; } else msg = r.json?.['error-type'] || err(r);
+        break;
+      }
+      case 'groq': {
+        if (!env.GROQ_API_KEY) { msg = 'No key set'; break; }
+        const r = await http('https://api.groq.com/openai/v1/models', { headers: { Authorization: `Bearer ${env.GROQ_API_KEY}` } });
+        if (r.ok && Array.isArray(r.json?.data)) { ok = true; msg = `OK - ${r.json.data.length} models available`; } else msg = err(r);
+        break;
+      }
+      case 'lunarcrush': {
+        if (!env.LUNARCRUSH_API_KEY) { msg = 'No key set'; break; }
+        const r = await http('https://lunarcrush.com/api4/public/coins/BTC/v1', { headers: { Authorization: `Bearer ${env.LUNARCRUSH_API_KEY}` } });
+        if (r.ok && r.json?.data) { ok = true; msg = 'OK - data received'; } else msg = r.json?.error || '200 but no data (needs paid tier)';
+        break;
+      }
+      case 'bybit': {
+        const r = await http('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT');
+        if (r.ok && r.json?.retCode === 0) { ok = true; msg = `OK - BTC funding ${r.json.result?.list?.[0]?.fundingRate}`; } else msg = err(r);
         break;
       }
       default:

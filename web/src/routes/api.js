@@ -97,6 +97,7 @@ router.get('/audit', requireAdmin, (req, res) =>
   res.json({ items: configView.getAudit(clampInt(req.query.limit, 50, 1, 200)) }),
 );
 router.get('/apis', requireAdmin, (_req, res) => res.json({ catalog: apiTests.listCatalog() }));
+router.get('/providers', requireAdmin, (_req, res) => res.json({ providers: bridge.providerHealth() }));
 router.post('/apis/:id/test', requireAdmin, testLimiter, async (req, res) => {
   if (!apiTests.CATALOG.find((a) => a.id === req.params.id)) return res.status(404).json({ error: 'unknown api' });
   res.json(await apiTests.runTest(req.params.id));

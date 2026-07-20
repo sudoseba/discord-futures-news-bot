@@ -1,6 +1,7 @@
 const http = require('http');
 const log = require('../utils/logger').child('healthz');
 const cronManager = require('../utils/cronManager');
+const circuitBreaker = require('../utils/circuitBreaker');
 const { getDb } = require('../services/database');
 
 let server = null;
@@ -37,6 +38,7 @@ function snapshot() {
         memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
         pid: process.pid,
         version: require('../../package.json').version,
+        providers: circuitBreaker.snapshot(),
     };
 }
 

@@ -230,9 +230,10 @@ async function system() {
 
 // ── Admin ───────────────────────────────────────────────────────────────────
 async function admin() {
-  let cfg, apis, audit;
+  let cfg, apis, audit, prov;
   try {
     [cfg, apis, audit] = await Promise.all([getJSON('/api/config'), getJSON('/api/apis'), getJSON('/api/audit?limit=40')]);
+    prov = await getJSON('/api/providers').catch(() => ({ providers: [] }));
   } catch (e) {
     if (e.status === 403) return { el: el('div', { class: 'banner crit' }, "Admin only — your account isn't configured as an admin.") };
     throw e;
@@ -259,6 +260,18 @@ async function admin() {
     ));
   });
   root.append(el('div', { class: 'section' }, card('API connectivity tests', testWrap)));
+
+  // Data provider health (circuit breakers)
+  const provRows = (prov?.providers || []).map((p) => [
+    el('span', { class: 'mono' }, p.name),
+    badge(p.state === 'closed' ? 'ok' : p.state === 'open' ? 'crit' : 'warn', p.state),
+    el('span', { class: 'num' }, `${p.ok}/${p.ok + p.err}`),
+    el('span', { class: 'muted', title: p.lastErrMsg || '' }, (p.lastErrMsg || '').slice(0, 60)),
+  ]);
+  root.append(el('div', { class: 'section' }, card('Data provider health (circuit breakers)',
+    provRows.length ? table(['Provider', 'State', 'OK/total', 'Last error'], provRows)
+      : empty('No provider calls recorded yet — run a command (e.g. quote gold) to populate.'),
+  )));
 
   // Bot config (masked)
   const cfgWrap = el('div', {});
