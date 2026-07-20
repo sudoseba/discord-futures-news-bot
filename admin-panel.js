@@ -51,6 +51,12 @@ const WEB_DIR = path.join(PROJECT_DIR, 'web');
 const WEB_PID_FILE = path.join(PROJECT_DIR, '.adminpanel-web.pid');
 const WEB_OUT_LOG = path.join(LOG_DIR, 'web.out.log');
 const WEB_ERR_LOG = path.join(LOG_DIR, 'web.err.log');
+const BIN_DIR = path.join(PROJECT_DIR, '.bin');
+const CLOUDFLARED = path.join(BIN_DIR, process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
+const TUNNEL_PID_FILE = path.join(PROJECT_DIR, '.adminpanel-tunnel.pid');
+const TUNNEL_LOG = path.join(LOG_DIR, 'tunnel.log');
+const TUNNEL_URL_FILE = path.join(PROJECT_DIR, '.adminpanel-tunnel.url');
+const WEB_URL_BAK = path.join(PROJECT_DIR, '.adminpanel-weburl.bak');
 
 let VERSION = '2.0.0';
 try {
@@ -533,6 +539,8 @@ async function printWebStatus() {
   const { ok } = await webLivez();
   if (ok) console.log(`  /livez      : ${green('responding')} → ${webPublicUrl()}`);
   else console.log(`  /livez      : ${red('no response')} on http://127.0.0.1:${webPort()}/livez`);
+  if (tunnelPidAlive()) console.log(`  tunnel      : ${green('UP (public)')} → ${tunnelUrl() || '(url pending)'}`);
+  else console.log(`  tunnel      : ${dim('off (local/Tailnet only)')}`);
   console.log(dim('  (want it to survive reboots? bash web/deploy/install-web-service.sh --start)'));
   console.log(dim('─'.repeat(60)));
 }
@@ -839,6 +847,109 @@ async function controlMenu() {
   }
 }
 
+// ─── Cloudflare quick tunnel (publish the dashboard to the internet) ─────────
+function cloudflaredBin() {
+  const sys = spawnSync('cloudflared', ['--version'], { stdio: 'ignore' });
+  if (!sys.error) return 'cloudflared';
+  if (fs.existsSync(CLOUDFLARED)) return CLOUDFLARED;
+  return null;
+}
+
+function ensureCloudflared() {
+  const existing = cloudflaredBin();
+  if (existing) return existing;
+  if (process.platform !== 'linux') {
+    console.log(yellow('cloudflared not found. Auto-install is Linux-only (the Pi).'));
+    console.log(dim('  Manual: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/'));
+    return null;
+  }
+  const a = { arm64: 'arm64', arm: 'arm', x64: 'amd64' }[os.arch()];
+  if (!a) { console.log(red(`Unsupported CPU arch "${os.arch()}" — install cloudflared manually.`)); return null; }
+  fs.mkdirSync(BIN_DIR, { recursive: true });
+  const url = `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${a}`;
+  console.log(cyan(`Downloading cloudflared (linux-${a})...`));
+  let r = spawnSync('curl', ['-fL', '--progress-bar', '-o', CLOUDFLARED, url], { stdio: 'inherit' });
+  if (r.status !== 0) { console.log(dim('  curl failed, trying wget...')); r = spawnSync('wget', ['-qO', CLOUDFLARED, url], { stdio: 'inherit' }); }
+  if (r.status !== 0 || !fs.existsSync(CLOUDFLARED)) { console.log(red('cloudflared download failed — check internet connection.')); return null; }
+  try { fs.chmodSync(CLOUDFLARED, 0o755); } catch { /* */ }
+  console.log(green('cloudflared installed → .bin/cloudflared'));
+  return CLOUDFLARED;
+}
+
+function tunnelPidAlive() {
+  try { const pid = parseInt(fs.readFileSync(TUNNEL_PID_FILE, 'utf8').trim(), 10); return Number.isInteger(pid) && pidAlive(pid); }
+  catch { return false; }
+}
+function tunnelUrl() { try { return fs.readFileSync(TUNNEL_URL_FILE, 'utf8').trim(); } catch { return ''; } }
+
+async function tunnelStart() {
+  if (tunnelPidAlive()) { console.log(yellow(`Tunnel already running → ${tunnelUrl() || '(url pending)'}`)); return; }
+
+  // 1) the dashboard must be up (the tunnel proxies to it)
+  let up = (await webLivez()).ok;
+  if (!up) {
+    console.log(yellow('Web dashboard not responding — starting it first...'));
+    if (!webStart()) return;
+    for (let i = 0; i < 24 && !up; i++) { sleepSync(500); up = (await webLivez()).ok; }
+    if (!up) { console.log(red('Web dashboard did not come up — run Setup (menu → 6) first.')); return; }
+  }
+
+  // 2) ensure cloudflared is installed
+  const bin = ensureCloudflared();
+  if (!bin) return;
+
+  // 3) launch the quick tunnel
+  if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+  fs.writeFileSync(TUNNEL_LOG, '');
+  const port = webPort();
+  console.log(cyan(`\n  Opening Cloudflare tunnel → http://localhost:${port} ...`));
+  const out = fs.openSync(TUNNEL_LOG, 'a');
+  const child = spawn(bin, ['tunnel', '--no-autoupdate', '--url', `http://localhost:${port}`], { detached: true, stdio: ['ignore', out, out] });
+  fs.writeFileSync(TUNNEL_PID_FILE, String(child.pid));
+  child.unref();
+
+  // 4) wait for the public URL to appear in the log
+  let turl = null;
+  for (let i = 0; i < 40; i++) {
+    sleepSync(500);
+    try { const m = fs.readFileSync(TUNNEL_LOG, 'utf8').match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i); if (m) { turl = m[0]; break; } } catch { /* */ }
+    if (!tunnelPidAlive()) { console.log(red('cloudflared exited early — see logs/tunnel.log')); return; }
+  }
+  if (!turl) { console.log(red('Tunnel started but no URL yet — check logs/tunnel.log (it may still appear).')); return; }
+  fs.writeFileSync(TUNNEL_URL_FILE, turl);
+
+  // 5) point the dashboard at the public URL + restart so cookies/redirects match
+  const prevUrl = webPublicUrl();
+  if (prevUrl && !prevUrl.includes('trycloudflare.com')) { try { fs.writeFileSync(WEB_URL_BAK, prevUrl); } catch { /* */ } }
+  setWebEnv({ WEB_PUBLIC_URL: turl });
+  console.log(dim('  Wrote WEB_PUBLIC_URL and restarting the dashboard so it uses the public URL...'));
+  webControl('restart');
+
+  console.log(green(`\n  🌐 Dashboard is PUBLIC at:  ${turl}`));
+  console.log(yellow('  ⚠ It is now reachable from the internet — use strong passwords.'));
+  console.log(dim('  (Quick-tunnel URLs change each start. Use Stop tunnel to take it offline.)'));
+}
+
+function tunnelStop() {
+  if (!tunnelPidAlive()) { console.log(yellow('No tunnel running.')); try { fs.unlinkSync(TUNNEL_PID_FILE); } catch { /* */ } return; }
+  const pid = parseInt(fs.readFileSync(TUNNEL_PID_FILE, 'utf8').trim(), 10);
+  try {
+    process.kill(pid, 'SIGTERM');
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline && pidAlive(pid)) sleepSync(150);
+    if (pidAlive(pid)) process.kill(pid, 'SIGKILL');
+    console.log(green('Tunnel stopped.'));
+  } catch (e) { console.log(red('Stop error: ' + e.message)); }
+  try { fs.unlinkSync(TUNNEL_PID_FILE); } catch { /* */ }
+  try { fs.unlinkSync(TUNNEL_URL_FILE); } catch { /* */ }
+  // restore the pre-tunnel local URL so local (http) login works again
+  try {
+    const bak = fs.readFileSync(WEB_URL_BAK, 'utf8').trim();
+    if (bak) { setWebEnv({ WEB_PUBLIC_URL: bak }); console.log(dim(`Restored WEB_PUBLIC_URL → ${bak}; restarting dashboard...`)); webControl('restart'); }
+    fs.unlinkSync(WEB_URL_BAK);
+  } catch { /* nothing to restore */ }
+}
+
 function detectIp() {
   try {
     const r = spawnSync('tailscale', ['ip', '-4'], { encoding: 'utf8', timeout: 2500 });
@@ -929,7 +1040,8 @@ async function webSetup() {
 async function webMenu() {
   for (;;) {
     await printWebStatus();
-    console.log('   1) Start     2) Stop     3) Restart     4) Logs     5) Refresh     6) Setup (deps + config)     b) Back');
+    console.log('   1) Start   2) Stop   3) Restart   4) Logs   5) Refresh   6) Setup');
+    console.log('   7) Publish (Cloudflare tunnel)   8) Unpublish (stop tunnel)   b) Back');
     const a = (await ask('\n  > ')).trim().toLowerCase();
     if (a === 'b' || a === '') return;
     if (a === '1') webControl('start');
@@ -938,6 +1050,8 @@ async function webMenu() {
     else if (a === '4') { webLogs(200); await ask(dim('\n  (enter to continue) ')); }
     else if (a === '5') { /* loop reprints status */ }
     else if (a === '6') await webSetup();
+    else if (a === '7') await tunnelStart();
+    else if (a === '8') tunnelStop();
     else console.log(red('  Not a valid choice.'));
   }
 }
@@ -977,6 +1091,7 @@ One-shot subcommands:
   health                              print /healthz JSON view
   start | stop | restart              control the bot
   web <setup|status|start|stop|restart|logs>  set up / control the web dashboard
+  web tunnel <start|stop>              publish the dashboard via a Cloudflare tunnel
   logs [--follow|-f] [N]              show (or follow) bot logs
   test <api> | test-all              run API connectivity tests
   deploy                              register slash commands
@@ -1034,6 +1149,12 @@ async function cli(argv) {
       const action = rest[0] || 'status';
       if (action === 'status') await printWebStatus();
       else if (action === 'setup') await webSetup();
+      else if (action === 'tunnel') {
+        const sub = rest[1] || 'status';
+        if (sub === 'start') await tunnelStart();
+        else if (sub === 'stop') tunnelStop();
+        else await printWebStatus();
+      }
       else if (['start', 'stop', 'restart'].includes(action)) webControl(action);
       else if (action === 'logs') {
         if (rest.includes('-f') || rest.includes('--follow')) {
@@ -1044,7 +1165,7 @@ async function cli(argv) {
             spawnSync('tail', ['-n', '50', '-f', WEB_OUT_LOG], { stdio: 'inherit' });
           }
         } else webLogs(200);
-      } else { console.log(red('usage: web <status|start|stop|restart|logs>')); process.exitCode = 1; }
+      } else { console.log(red('usage: web <setup|status|start|stop|restart|logs|tunnel <start|stop>>')); process.exitCode = 1; }
       break;
     }
     case '-h': case '--help': case 'help': usage(); break;

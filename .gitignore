@@ -18,3 +18,6 @@ Thumbs.db
 *.swp
 ANALYSIS.md
 owner manual.txt
+.bin/
+.adminpanel-*.pid
+.adminpanel-tunnel.url
