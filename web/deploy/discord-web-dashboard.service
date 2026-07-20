@@ -1,0 +1,30 @@
+# systemd unit for the Discord News Bot — Web Dashboard (separate service).
+# Template: __USER__ / __DIR__ / __NODE__ are filled in by install-web-service.sh.
+#   __DIR__ is the REPO ROOT; the app lives in __DIR__/web.
+#
+# Manage:  sudo systemctl {start,stop,restart,status} discord-web-dashboard
+# Logs:    journalctl -u discord-web-dashboard -f
+
+[Unit]
+Description=Discord News Bot — Web Dashboard
+Documentation=file:__DIR__/web/README.md
+After=network-online.target discord-news-bot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__/web
+ExecStart=__NODE__ src/index.js
+EnvironmentFile=-__DIR__/web/.env
+Environment=NODE_ENV=production
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=discord-web-dashboard
+
+[Install]
+WantedBy=multi-user.target

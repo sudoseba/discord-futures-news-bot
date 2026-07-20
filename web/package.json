@@ -1,0 +1,27 @@
+{
+  "name": "discord-news-bot-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Companion web dashboard for the Discord Futures News Bot — a separate, Discord-login-gated service that reads the bot's SQLite DB read-only and proxies /healthz.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test",
+    "secret": "node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "cookie": "^0.7.2",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "pino": "^9.14.0",
+    "pino-pretty": "^11.3.0",
+    "ws": "^8.18.0"
+  }
+}
