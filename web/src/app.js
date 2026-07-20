@@ -23,6 +23,9 @@ function createApp() {
   // Liveness for the dashboard process itself (no auth).
   app.get('/livez', (_req, res) => res.json({ ok: true, service: 'web', ts: Date.now() }));
 
+  // Never let a CDN/tunnel/browser cache authenticated API or auth responses.
+  app.use(['/api', '/auth'], (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+
   app.use('/auth', authRoutes);
   app.use('/api', security.apiLimiter, apiRoutes);
 

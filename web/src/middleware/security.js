@@ -36,10 +36,13 @@ const apiLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 600, ...common });
 // Login/OAuth — stricter, these hit Discord.
 const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40, ...common });
 
+// Password login — tightest (brute-force guard). Per client IP.
+const loginLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 12, ...common });
+
 // Admin API-test actions make outbound calls — keep them modest.
 const testLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 60, ...common });
 
 // Console commands can hit upstreams / the LLM — bound them.
 const consoleLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 120, ...common });
 
-module.exports = { headers, apiLimiter, authLimiter, testLimiter, consoleLimiter };
+module.exports = { headers, apiLimiter, authLimiter, loginLimiter, testLimiter, consoleLimiter };

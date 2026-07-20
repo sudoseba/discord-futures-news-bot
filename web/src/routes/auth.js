@@ -7,12 +7,12 @@ const discord = require('../auth/discord');
 const sessions = require('../auth/sessions');
 const access = require('../auth/access');
 const localUsers = require('../auth/localUsers');
-const { authLimiter } = require('../middleware/security');
+const { authLimiter, loginLimiter } = require('../middleware/security');
 
 const router = express.Router();
 
 // ─── Local username/password login ──────────────────────────────────────────
-router.post('/local', authLimiter, (req, res) => {
+router.post('/local', loginLimiter, (req, res) => {
   if (!config.passwordAuthEnabled) return res.status(404).json({ error: 'password login is not enabled' });
   const username = String((req.body && req.body.username) || '').trim();
   const password = String((req.body && req.body.password) || '');

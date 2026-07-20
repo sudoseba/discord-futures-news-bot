@@ -9,6 +9,9 @@ function notFound(req, res) {
   if (req.path.startsWith('/api') || req.path.startsWith('/auth')) {
     return res.status(404).json({ error: 'not found' });
   }
+  // Defense in depth: don't even hand out the app shell without a session
+  // (all data is already API-gated, but this keeps the UI behind the wall too).
+  if (!req.user) return res.redirect('/login');
   return res.status(200).sendFile(path.join(PUBLIC_DIR, 'index.html'));
 }
 
