@@ -454,7 +454,7 @@ function fallbackAlive() {
 
 async function healthzCheck() {
   const port = effective('HEALTHZ_PORT') || '3000';
-  const r = await httpRequest({ url: `http://127.0.0.1:${port}/healthz`, timeoutMs: 4000 });
+  const r = await httpRequest({ url: `http://127.0.0.1:${port}/healthz`, timeoutMs: 9000 });
   return { port, r, json: r.body ? parseJson(r.body) : null };
 }
 

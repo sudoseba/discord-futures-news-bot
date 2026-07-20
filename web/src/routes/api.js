@@ -25,7 +25,7 @@ router.get('/me', (req, res) => {
 // Live bot health (any logged-in user).
 router.get('/health', requireAuth, async (req, res) => {
   const h = await health.getHealth(req.query.force === '1');
-  res.json({ ok: h.ok, status: h.status, error: h.error, data: h.data, botDb: botAvailable(), fetchedAt: h.at });
+  res.json({ ok: h.ok, status: h.status, error: h.error, url: h.url, data: h.data, botDb: botAvailable(), fetchedAt: h.at });
 });
 
 router.get('/overview', requireAuth, (_req, res) => res.json(stats.getOverview()));
