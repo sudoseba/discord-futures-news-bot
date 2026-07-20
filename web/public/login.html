@@ -13,13 +13,23 @@
     <div class="login-card">
       <div class="login-logo">📈</div>
       <h1>Discord News Bot</h1>
-      <p>Companion dashboard · sign in with the Discord account that's in the server.</p>
-      <a class="btn-discord" href="/auth/login">
+      <p id="subtitle">Companion dashboard — sign in to continue.</p>
+
+      <a id="discordBtn" class="btn-discord" href="/auth/login" style="display:none">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.3.5c1.6.4 2.9 1 4.1 1.9-2-1-4.2-1.5-6.7-1.5s-4.7.5-6.7 1.5c1.2-.9 2.6-1.6 4.1-1.9L9.4 3a19.8 19.8 0 0 0-4.9 1.4C1.8 8.3 1 12.1 1.2 15.8a19.9 19.9 0 0 0 6 3l.8-1.2c-.9-.3-1.7-.7-2.4-1.2l.5-.4c2.3 1.1 4.8 1.6 7.4 1.6s5.1-.5 7.4-1.6l.5.4c-.7.5-1.5.9-2.4 1.2l.8 1.2a19.9 19.9 0 0 0 6-3c.3-4.3-.7-8-3.8-11.4ZM8.7 13.7c-.9 0-1.7-.9-1.7-1.9s.8-1.9 1.7-1.9 1.7.9 1.7 1.9-.7 1.9-1.7 1.9Zm6.6 0c-.9 0-1.7-.9-1.7-1.9s.8-1.9 1.7-1.9 1.7.9 1.7 1.9-.7 1.9-1.7 1.9Z"/></svg>
         Continue with Discord
       </a>
+
+      <div id="orDiv" class="login-or" style="display:none">or</div>
+
+      <form id="pwForm" class="pw-form" style="display:none">
+        <input id="pwUser" name="username" class="pw-input" placeholder="Username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" />
+        <input id="pwPass" name="password" type="password" class="pw-input" placeholder="Password" autocomplete="current-password" />
+        <button type="submit" class="btn-discord pw-submit">Sign in</button>
+      </form>
+
       <div id="err" class="login-error"></div>
-      <div class="login-foot">Access is limited to members of the bot's server.</div>
+      <div class="login-foot">Access is limited to authorized users.</div>
     </div>
   </div>
   <script type="module" src="/js/login.js"></script>

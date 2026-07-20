@@ -6,14 +6,36 @@ const log = require('../logger').child('auth');
 const discord = require('../auth/discord');
 const sessions = require('../auth/sessions');
 const access = require('../auth/access');
+const localUsers = require('../auth/localUsers');
 const { authLimiter } = require('../middleware/security');
 
 const router = express.Router();
 
+// ─── Local username/password login ──────────────────────────────────────────
+router.post('/local', authLimiter, (req, res) => {
+  if (!config.passwordAuthEnabled) return res.status(404).json({ error: 'password login is not enabled' });
+  const username = String((req.body && req.body.username) || '').trim();
+  const password = String((req.body && req.body.password) || '');
+  const user = localUsers.verify(username, password);
+  if (!user) {
+    sessions.audit('login_denied', { username: username.slice(0, 40), detail: 'bad local credentials', ip: req.ip });
+    log.warn({ username }, 'local login failed');
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+  const sess = sessions.createSession(
+    { id: user.id, username: user.username, globalName: user.username, avatar: null, isMember: true, isAdmin: user.isAdmin, roles: [] },
+    { ip: req.ip, userAgent: req.headers['user-agent'] },
+  );
+  res.setHeader('Set-Cookie', sessions.buildSetCookie(sess.cookie, sessions.SESSION_TTL_MS));
+  sessions.audit('login', { userId: user.id, username: user.username, detail: 'local ' + (user.isAdmin ? 'admin' : 'member'), ip: req.ip });
+  log.info({ user: user.id, isAdmin: user.isAdmin }, 'local login ok');
+  res.json({ ok: true });
+});
+
 // Kick off the OAuth flow.
 router.get('/login', authLimiter, (req, res) => {
-  if (!config.authConfigured) {
-    return res.status(503).send('Login is not configured on this server (missing Discord client id/secret).');
+  if (!config.discordLoginEnabled) {
+    return res.redirect('/login?error=disabled');
   }
   const redirectTo = sanitizeRedirect(req.query.redirect);
   const state = sessions.createState(redirectTo);

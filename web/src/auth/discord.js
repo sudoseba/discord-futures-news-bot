@@ -83,7 +83,8 @@ async function fetchGuildMember(accessToken, guildId) {
 /** Build the CDN URL for a user's avatar (or a default). */
 function avatarUrl(userId, avatarHash) {
   if (!avatarHash) {
-    const idx = (BigInt(userId) >> 22n) % 6n;
+    let idx = 0;
+    try { idx = Number((BigInt(userId) >> 22n) % 6n); } catch { idx = 0; } // local users have non-numeric ids
     return `https://cdn.discordapp.com/embed/avatars/${idx}.png`;
   }
   const ext = avatarHash.startsWith('a_') ? 'gif' : 'png';

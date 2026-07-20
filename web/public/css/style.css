@@ -76,6 +76,12 @@ button { font-family: inherit; }
 }
 .login-error.show { display: block; }
 .login-foot { margin-top: 22px; font-size: 12px; color: var(--muted); }
+.pw-form { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.pw-input { width: 100%; padding: 11px 13px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text); font-size: 14px; outline: none; }
+.pw-input:focus { border-color: var(--accent); }
+.pw-submit { background: var(--accent); margin-top: 2px; }
+.login-or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 16px 0; }
+.login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
 /* ── App shell ──────────────────────────────────────────────────────────── */
 .app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }

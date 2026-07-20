@@ -899,16 +899,25 @@ async function webSetup() {
   const defUrl = `http://${detectIp()}:8080`;
   console.log('');
   const url = (await ask(`  Public URL for the dashboard [${defUrl}]: `)).trim() || defUrl;
-  const admin = (await ask('  Your Discord user ID (admin access; blank to skip): ')).trim();
-  const dev = (await ask('  Enable quick DEV_AUTH login (no Discord, local preview)? [y/N]: ')).trim().toLowerCase().startsWith('y');
 
   const updates = { SESSION_SECRET: secret, WEB_PUBLIC_URL: url };
-  if (admin) updates.ADMIN_USER_IDS = admin;
-  if (dev) updates.DEV_AUTH = '1';
+  console.log(dim('\n  Login method — leave the next line blank to use Discord instead.'));
+  const users = (await ask('  Username/password users (user:pass[:admin], comma-separated): ')).trim();
+  if (users) {
+    updates.WEB_USERS = users;
+    updates.DISCORD_LOGIN = 'false';
+  } else {
+    const admin = (await ask('  Your Discord user ID (admin access; blank to skip): ')).trim();
+    if (admin) updates.ADMIN_USER_IDS = admin;
+    const dev = (await ask('  Enable quick DEV_AUTH login (no Discord, local preview)? [y/N]: ')).trim().toLowerCase().startsWith('y');
+    if (dev) updates.DEV_AUTH = '1';
+  }
   setWebEnv(updates);
   console.log(green('\n  web/.env configured.'));
-  if (!dev && !url.startsWith('https')) {
-    console.log(yellow(`  ⚠ For real Discord login, add this redirect in the Discord Developer Portal (OAuth2 → Redirects):`));
+  if (users) {
+    console.log(dim(`  Password login enabled for: ${users.split(',').map((u) => u.split(':')[0]).join(', ')} (Discord button hidden).`));
+  } else if (!updates.DEV_AUTH && !url.startsWith('https')) {
+    console.log(yellow('  ⚠ For real Discord login, add this redirect in the Discord Developer Portal (OAuth2 → Redirects):'));
     console.log(`     ${url}/auth/callback`);
   }
 

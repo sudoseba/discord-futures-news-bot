@@ -18,7 +18,7 @@ const router = express.Router();
 
 // Who am I? (SPA calls this on load; safe when unauthenticated.)
 router.get('/me', (req, res) => {
-  if (!req.user) return res.json({ authenticated: false, authConfigured: config.authConfigured, devAuth: config.devAuth });
+  if (!req.user) return res.json({ authenticated: false, authConfigured: config.authConfigured, devAuth: config.devAuth, authMethods: { discord: config.discordLoginEnabled, password: config.passwordAuthEnabled } });
   res.json({ authenticated: true, authConfigured: config.authConfigured, user: publicUser(req.user) });
 });
 

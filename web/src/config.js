@@ -119,6 +119,19 @@ if (devAuth) {
   );
 }
 
+// ─── Local username/password login (alternative to Discord) ─────────────────
+// WEB_USERS=alice:pass1:admin,bob:pass2   (role optional; default member)
+const localUsers = list('WEB_USERS').map((entry) => {
+  const parts = entry.split(':');
+  return { username: (parts[0] || '').trim(), password: parts[1] || '', role: (parts[2] || 'member').trim().toLowerCase() };
+}).filter((u) => u.username && u.password);
+const passwordAuthEnabled = localUsers.length > 0;
+const discordLoginEnabled = bool('DISCORD_LOGIN', true) && authConfigured;
+
+if (!discordLoginEnabled && !passwordAuthEnabled && !devAuth) {
+  warnings.push('No login method is enabled — set WEB_USERS for password login, or configure Discord, or DEV_AUTH for preview.');
+}
+
 module.exports = {
   nodeEnv,
   isProd,
@@ -130,6 +143,9 @@ module.exports = {
   discord,
   authConfigured,
   devAuth,
+  localUsers,
+  passwordAuthEnabled,
+  discordLoginEnabled,
   access,
   bot,
   webDbPath,
@@ -145,6 +161,7 @@ module.exports = {
       redirectUri: discord.redirectUri,
       authConfigured,
       devAuth,
+      loginMethods: { discord: discordLoginEnabled, password: passwordAuthEnabled ? `${localUsers.length} user(s)` : false },
       guildId: discord.guildId || null,
       requireGuildMembership: access.requireGuildMembership,
       admins: { userIds: access.adminUserIds.length, roleId: Boolean(access.adminRoleId) },
