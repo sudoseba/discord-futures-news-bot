@@ -29,6 +29,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Must beat class rules like .login-wrap/.app { display: grid } so the `hidden`
+   attribute actually hides the boot overlay / app shell. */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0;

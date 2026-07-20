@@ -78,11 +78,11 @@ const COMMANDS = [
   { name: 'brief', aliases: ['briefing'], usage: 'brief [category]', desc: 'AI news briefing (TLDR + curation)', group: 'ai', ai: true,
     run: async ({ args }) => ({ type: 'brief', title: (args[0] || 'all'), data: await bridge.brief(args[0] || 'all') }) },
 
-  { name: 'ai', aliases: ['ask'], usage: 'ai <question>', desc: 'Ask the desk analyst anything', group: 'ai', ai: true,
+  { name: 'ai', aliases: ['ask'], usage: 'ai <question>', desc: 'Ask the desk analyst (grounded in live prices)', group: 'ai', ai: true,
     run: async ({ rest }) => {
       const q = need(rest, 'question');
-      const answer = await bridge.chat(q);
-      return { type: 'ai', data: { prompt: q, answer } };
+      const r = await bridge.ask(q);
+      return { type: 'ai', data: { prompt: q, answer: r.answer } };
     } },
 
   { name: 'clear', aliases: ['cls'], usage: 'clear', desc: 'Clear the terminal', group: 'general',

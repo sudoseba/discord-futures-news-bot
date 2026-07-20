@@ -18,7 +18,8 @@ async function getHealth(force = false) {
     try { data = JSON.parse(text); } catch { /* non-JSON */ }
     cache = { at: now, ok: res.ok, status: res.status, data, error: null };
   } catch (err) {
-    cache = { at: now, ok: false, status: 0, data: null, error: err.message };
+    const msg = err.name === 'AbortError' ? 'timed out — bot not responding' : err.message;
+    cache = { at: now, ok: false, status: 0, data: null, error: msg };
   } finally {
     clearTimeout(t);
   }

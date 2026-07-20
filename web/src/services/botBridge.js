@@ -195,6 +195,37 @@ async function chat(prompt, opts = {}) {
   return completion.choices[0]?.message?.content || '';
 }
 
+// Freeform AI, grounded with the current live market snapshot so it uses real
+// prices/levels instead of hallucinating from stale training data.
+async function ask(question) {
+  ensure();
+  if (!aiAvailable()) throw new Error('AI is not configured (need CEREBRAS_API_KEY in the bot .env)');
+  const [macroData, fear, quotes] = await Promise.all([
+    macro().catch(() => null),
+    fearGreed().catch(() => null),
+    allQuotes().catch(() => ({})),
+  ]);
+  const pct = (v) => (v == null ? '' : ` (${v > 0 ? '+' : ''}${Number(v).toFixed(2)}%)`);
+  const lines = [];
+  if (macroData) {
+    const m = [];
+    if (macroData.dxy) m.push(`DXY ${macroData.dxy.price}${pct(macroData.dxy.changePercent)}`);
+    if (macroData.tnx) m.push(`US10Y ${macroData.tnx.price}%${pct(macroData.tnx.changePercent)}`);
+    if (macroData.vix) m.push(`VIX ${macroData.vix.price}${pct(macroData.vix.changePercent)}`);
+    if (m.length) lines.push('Macro: ' + m.join(' · '));
+  }
+  if (fear) lines.push(`Crypto Fear & Greed: ${fear.value} (${fear.label})`);
+  for (const v of Object.values(quotes)) {
+    if (v && v.quote) lines.push(`${v.name}: ${v.quote.current}${pct(v.quote.changePercent)}`);
+  }
+  const context = lines.length
+    ? `LIVE MARKET DATA (current — use THESE exact numbers, never prices from your training data):\n${lines.join('\n')}\n\n`
+    : '';
+  const system = 'You are an elite futures trading-desk analyst. You are given CURRENT live market data. ALWAYS use the provided live prices and levels; your own training-data prices are outdated and must not be used. Be sharp, specific and concise.';
+  const answer = await chat(`${context}Question: ${question}`, { system, maxTokens: 900 });
+  return { answer, grounded: lines.length > 0 };
+}
+
 async function verdict(sym) {
   ensure();
   if (!aiAvailable()) throw new Error('AI is not configured (need CEREBRAS_API_KEY in the bot .env)');
@@ -261,4 +292,5 @@ module.exports = {
   verdict,
   brief,
   chat,
+  ask,
 };
