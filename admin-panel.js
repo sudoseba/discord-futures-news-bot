@@ -46,6 +46,9 @@ const PID_FILE = path.join(PROJECT_DIR, '.adminpanel-bot.pid');
 const SERVICE = process.env.BOT_SERVICE || 'discord-news-bot';
 const WEB_SERVICE = process.env.WEB_SERVICE || 'discord-web-dashboard';
 const WEB_DIR = path.join(PROJECT_DIR, 'web');
+const WEB_PID_FILE = path.join(PROJECT_DIR, '.adminpanel-web.pid');
+const WEB_OUT_LOG = path.join(LOG_DIR, 'web.out.log');
+const WEB_ERR_LOG = path.join(LOG_DIR, 'web.err.log');
 
 let VERSION = '2.0.0';
 try {
@@ -467,44 +470,79 @@ async function webLivez() {
   return { ok: r.ok, r };
 }
 
+function readWebPid() { try { return parseInt(fs.readFileSync(WEB_PID_FILE, 'utf8').trim(), 10); } catch { return NaN; } }
+function webPidAlive() { const pid = readWebPid(); return Number.isInteger(pid) && pidAlive(pid); }
+
+function webStart() {
+  if (webInstalled()) { console.log(cyan(`start ${WEB_SERVICE} via systemd...`)); return sysctl(['start', WEB_SERVICE]).status === 0; }
+  // fallback: plain background process — no service needed
+  if (webPidAlive()) { console.log(yellow('Web dashboard already running (tracked PID).')); return true; }
+  if (!fs.existsSync(path.join(WEB_DIR, 'node_modules'))) { console.log(yellow('Web dependencies not installed.')); console.log(dim('  cd web && npm ci --omit=dev')); return false; }
+  if (!fs.existsSync(path.join(WEB_DIR, '.env'))) { console.log(yellow('web/.env is missing.')); console.log(dim('  cd web && cp .env.example .env   (then set SESSION_SECRET)')); return false; }
+  if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+  const out = fs.openSync(WEB_OUT_LOG, 'a');
+  const err = fs.openSync(WEB_ERR_LOG, 'a');
+  const child = spawn(process.execPath, ['src/index.js'], { cwd: WEB_DIR, detached: true, stdio: ['ignore', out, err] });
+  fs.writeFileSync(WEB_PID_FILE, String(child.pid));
+  child.unref();
+  console.log(green(`Web dashboard started (PID ${child.pid}) → ${webPublicUrl()}`));
+  console.log(dim('  background process (not a boot service) · logs: logs/web.out.log'));
+  return true;
+}
+
+function webStop() {
+  if (webInstalled()) { console.log(cyan(`stop ${WEB_SERVICE} via systemd...`)); return sysctl(['stop', WEB_SERVICE]).status === 0; }
+  if (!webPidAlive()) { console.log(yellow('No tracked web dashboard process to stop.')); try { fs.unlinkSync(WEB_PID_FILE); } catch { /* */ } return true; }
+  const pid = readWebPid();
+  try {
+    process.kill(pid, 'SIGTERM');
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline && pidAlive(pid)) sleepSync(200);
+    if (pidAlive(pid)) process.kill(pid, 'SIGKILL');
+    console.log(green(`Web dashboard stopped (PID ${pid}).`));
+  } catch (e) { console.log(red('Stop error: ' + e.message)); }
+  try { fs.unlinkSync(WEB_PID_FILE); } catch { /* */ }
+  return true;
+}
+
 function webControl(action) {
-  if (!HAS_SYSTEMD) { console.log(yellow('systemd not available on this host.')); return false; }
-  if (!webInstalled()) {
-    console.log(yellow(`Web dashboard service (${WEB_SERVICE}) is not installed.`));
-    if (!fs.existsSync(path.join(WEB_DIR, 'node_modules'))) console.log(dim('  First:   cd web && npm ci --omit=dev && cp .env.example .env'));
-    console.log(dim('  Install: bash web/deploy/install-web-service.sh --start'));
-    return false;
-  }
-  console.log(cyan(`${action} ${WEB_SERVICE} via systemd...`));
-  return sysctl([action, WEB_SERVICE]).status === 0;
+  if (action === 'start') return webStart();
+  if (action === 'stop') return webStop();
+  if (action === 'restart') { webStop(); sleepSync(600); return webStart(); }
+  return false;
 }
 
 async function printWebStatus() {
   console.log(bold('\nWeb dashboard status'));
   console.log(dim('─'.repeat(60)));
-  if (!HAS_SYSTEMD) {
-    console.log('  systemd     : not available (this panel targets the Pi)');
-  } else if (!webInstalled()) {
-    console.log(`  service     : ${yellow('not installed')} (${WEB_SERVICE})`);
-    console.log(dim('  install     : bash web/deploy/install-web-service.sh --start'));
-  } else {
+  if (webInstalled()) {
     const active = (sysctl(['is-active', WEB_SERVICE], false).stdout || '').trim() || 'unknown';
     const enabled = (sysctl(['is-enabled', WEB_SERVICE], false).stdout || '').trim();
-    console.log(`  service     : ${WEB_SERVICE}`);
+    console.log(`  mode        : systemd (${WEB_SERVICE})`);
     console.log(`  active      : ${active === 'active' ? green(active) : red(active)}`);
     console.log(`  boot-enabled: ${enabled === 'enabled' ? green(enabled) : yellow(enabled || 'no')}`);
+  } else {
+    console.log('  mode        : background process (no service — Start/Stop here)');
+    if (webPidAlive()) console.log(`  process     : ${green('RUNNING')} (PID ${readWebPid()})`);
+    else console.log(`  process     : ${red('STOPPED')}`);
   }
   const { ok } = await webLivez();
   if (ok) console.log(`  /livez      : ${green('responding')} → ${webPublicUrl()}`);
   else console.log(`  /livez      : ${red('no response')} on http://127.0.0.1:${webPort()}/livez`);
+  console.log(dim('  (want it to survive reboots? bash web/deploy/install-web-service.sh --start)'));
   console.log(dim('─'.repeat(60)));
 }
 
 function webLogs(lines = 200) {
-  if (!webInstalled()) { console.log(dim('web dashboard service not installed')); return; }
-  console.log(cyan(`Last ${lines} journal lines for ${WEB_SERVICE}:\n`));
-  const cmd = [...SUDO, 'journalctl', '-u', WEB_SERVICE, '-n', String(lines), '--no-pager'];
-  spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+  if (webInstalled()) {
+    console.log(cyan(`Last ${lines} journal lines for ${WEB_SERVICE}:\n`));
+    const cmd = [...SUDO, 'journalctl', '-u', WEB_SERVICE, '-n', String(lines), '--no-pager'];
+    spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+  } else {
+    const txt = tailFile(WEB_OUT_LOG, lines);
+    if (txt == null) console.log(dim('(no web log yet — start the web dashboard from this panel)'));
+    else console.log(txt);
+  }
 }
 
 // Start ------------------------------------------------------------
@@ -906,8 +944,12 @@ async function cli(argv) {
       else if (['start', 'stop', 'restart'].includes(action)) webControl(action);
       else if (action === 'logs') {
         if (rest.includes('-f') || rest.includes('--follow')) {
-          const cmd = [...SUDO, 'journalctl', '-u', WEB_SERVICE, '-f', '-n', '50', '--no-pager'];
-          spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+          if (webInstalled()) {
+            const cmd = [...SUDO, 'journalctl', '-u', WEB_SERVICE, '-f', '-n', '50', '--no-pager'];
+            spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+          } else {
+            spawnSync('tail', ['-n', '50', '-f', WEB_OUT_LOG], { stdio: 'inherit' });
+          }
         } else webLogs(200);
       } else { console.log(red('usage: web <status|start|stop|restart|logs>')); process.exitCode = 1; }
       break;
