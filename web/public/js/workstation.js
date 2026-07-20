@@ -342,6 +342,8 @@ function renderAnalysis(d) {
     ['Divergence', a.divergence?.type ? `${a.divergence.type} (${a.divergence.strength || ''})` : 'none'],
     ['Volatility', r.regime ? `${r.regimeEmoji || ''} ${r.regime} · exp move ${r.expectedMovePercent ?? '—'}%` : '—'],
   ];
+  if (a.volume) rows.push(['Volume', `${a.volume.label}${a.volume.ratio ? ' · ' + a.volume.ratio + '× 20d avg' : ''} · ${a.volume.trend}`]);
+  if (d.cot) rows.push(['COT positioning', `${d.cot.sentimentEmoji || ''} ${d.cot.sentiment || '—'} · comm ${fmtNum(d.cot.commercialNet)} · spec ${fmtNum(d.cot.speculatorNet)}`]);
   return el('div', {}, el('div', { class: 'quote-name' }, `${d.meta?.emoji || ''} ${d.meta?.name || d.symbol}`, d.quote ? el('span', { class: 'muted', style: 'font-weight:400;margin-left:8px' }, price(d.quote.current) + ' ' + pct(d.quote.changePercent)) : null),
     table(['Metric', 'Value'], rows.map(([k, v]) => [el('span', { class: 'muted' }, k), el('span', {}, v)])),
     d.levels ? levelsBlock('Key levels', d.levels) : null);

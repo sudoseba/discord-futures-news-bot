@@ -1,5 +1,7 @@
 const axios = require('axios');
 const Cache = require('../utils/cache');
+const withFallback = require('../utils/withFallback');
+const providers = require('./providers');
 
 const cache = new Cache(300_000); // 5 min TTL for sentiment data
 
@@ -10,25 +12,19 @@ const cache = new Cache(300_000); // 5 min TTL for sentiment data
  * @returns {Promise<{value: number, label: string, timestamp: number}|null>}
  */
 async function fetchFearGreedIndex() {
-    return cache.getOrFetch('sentiment:fear_greed', async () => {
-        try {
-            const { data } = await axios.get('https://api.alternative.me/fng/', {
-                params: { limit: 1 },
-                timeout: 5000,
-            });
-
-            if (!data?.data?.[0]) return null;
-
-            const entry = data.data[0];
-            return {
-                value: parseInt(entry.value),
-                label: entry.value_classification, // e.g., "Fear", "Greed", "Extreme Fear"
-                timestamp: parseInt(entry.timestamp),
-            };
-        } catch (err) {
-            console.error('[Sentiment] Fear & Greed fetch failed:', err.message);
-            return null;
-        }
+    return withFallback({
+        cache,
+        key: 'sentiment:fear_greed',
+        ttl: 300_000,
+        providers: [{
+            name: 'alternativeme',
+            run: async () => {
+                const { data } = await axios.get('https://api.alternative.me/fng/', { params: { limit: 1 }, timeout: 5000 });
+                if (!data?.data?.[0]) return null;
+                const entry = data.data[0];
+                return { value: parseInt(entry.value), label: entry.value_classification, timestamp: parseInt(entry.timestamp) };
+            },
+        }],
     });
 }
 
@@ -71,55 +67,34 @@ const FUNDING_SYMBOLS = ['BTCUSDT', 'ETHUSDT'];
  * @returns {Promise<Array<{symbol: string, rate: number, ratePercent: string, nextFunding: number}>>}
  */
 async function fetchFundingRates() {
-    return cache.getOrFetch('sentiment:funding_rates', async () => {
-        try {
-            const results = [];
+    const results = [];
+    for (const symbol of FUNDING_SYMBOLS) {
+        const f = await fundingForSymbol(symbol);
+        if (f) results.push(f);
+    }
+    return results;
+}
 
-            for (const symbol of FUNDING_SYMBOLS) {
-                try {
-                    const { data } = await axios.get('https://fapi.binance.com/fapi/v1/fundingRate', {
-                        params: { symbol, limit: 1 },
-                        timeout: 5000,
-                    });
-
-                    if (data?.[0]) {
-                        const rate = parseFloat(data[0].fundingRate);
-                        results.push({
-                            symbol,
-                            rate,
-                            ratePercent: (rate * 100).toFixed(4) + '%',
-                            fundingTime: data[0].fundingTime,
-                        });
-                    }
-                } catch (innerErr) {
-                    console.error(`[Sentiment] Funding rate fetch failed for ${symbol}:`, innerErr.message);
-                    // Try Binance US as fallback
-                    try {
-                        const { data } = await axios.get('https://fapi.binanceus.com/fapi/v1/fundingRate', {
-                            params: { symbol, limit: 1 },
-                            timeout: 5000,
-                        });
-                        if (data?.[0]) {
-                            const rate = parseFloat(data[0].fundingRate);
-                            results.push({
-                                symbol,
-                                rate,
-                                ratePercent: (rate * 100).toFixed(4) + '%',
-                                fundingTime: data[0].fundingTime,
-                            });
-                        }
-                    } catch {
-                        // Skip this symbol
-                    }
-                }
-            }
-
-            return results;
-        } catch (err) {
-            console.error('[Sentiment] Funding rates fetch failed:', err.message);
-            return [];
-        }
+/** Per-symbol funding with a non-Binance fallback (Bybit) + last-good. */
+function fundingForSymbol(symbol) {
+    return withFallback({
+        cache,
+        key: `funding:${symbol}`,
+        ttl: 300_000,
+        providers: [
+            { name: 'binance', run: () => binanceFunding('https://fapi.binance.com', symbol) },
+            { name: 'binanceus', run: () => binanceFunding('https://fapi.binanceus.com', symbol) },
+            { name: 'bybit', run: () => providers.bybitFunding(symbol) },
+        ],
     });
+}
+
+async function binanceFunding(base, symbol) {
+    const { data } = await axios.get(`${base}/fapi/v1/fundingRate`, { params: { symbol, limit: 1 }, timeout: 5000 });
+    if (!data?.[0]) return null;
+    const rate = parseFloat(data[0].fundingRate);
+    if (!Number.isFinite(rate)) return null;
+    return { symbol, rate, ratePercent: (rate * 100).toFixed(4) + '%', fundingTime: data[0].fundingTime };
 }
 
 /**

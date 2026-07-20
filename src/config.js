@@ -16,6 +16,14 @@ module.exports = {
   benzingaKey: process.env.BENZINGA_API_KEY,    // api.benzinga.com
   massiveKey: process.env.MASSIVE_API_KEY,      // massive.com (market data, not news)
   deepgramTtsKey: process.env.DEEPGRAM_TTS_API_KEY,  // deepgram.com TTS for recap audio
+
+  // Redundancy / additional data sources
+  twelveDataKey: process.env.TWELVEDATA_API_KEY,       // twelvedata.com — FX/metals/crypto/stocks quotes+candles
+  massiveApiKey: process.env.MASSIVE_API_KEY,          // massive.com — Polygon-shaped stocks/fx/crypto (volume+vwap)
+  exchangeRateKey: process.env.EXCHANGERATE_API_KEY,   // exchangerate-api.com — FX reference rates
+  lunarCrushKey: process.env.LUNARCRUSH_API_KEY,       // lunarcrush.com — crypto social (needs paid tier)
+  groqApiKey: process.env.GROQ_API_KEY,                // groq.com — fast LLM, Cerebras failover
+  groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
   // How long AI-generated outputs are cached before a fresh one is generated (ms).
   // If two users run the same command within this window, they get the same response
   // instantly — no duplicate LLM call, no extra latency.

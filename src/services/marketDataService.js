@@ -4,6 +4,8 @@ const yahooFinance = new YahooFinance();
 const config = require('../config');
 const Cache = require('../utils/cache');
 const { finnhubLimiter } = require('../utils/rateLimiter');
+const withFallback = require('../utils/withFallback');
+const providers = require('./providers');
 
 const cache = new Cache(60_000); // 1 min TTL for market data
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
@@ -457,44 +459,19 @@ async function fetchCandlesFinnhub(symbol, days = 90) {
  *   5. Finnhub (rate-limited fallback)
  */
 async function fetchCandles(symbol, resolution = 'D', days = 90) {
-    return cache.getOrFetch(`candles:${symbol}:${resolution}:${days}`, async () => {
-        // Yahoo first — broadest coverage
-        let candles = await fetchCandlesYahoo(symbol, days);
-        if (candles) {
-            console.log(`[Data] ✅ ${symbol} candles → Yahoo Finance`);
-            return candles;
-        }
-
-        // Stooq — best for futures when Yahoo is flaky
-        candles = await fetchCandlesStooq(symbol, days);
-        if (candles) {
-            console.log(`[Data] ✅ ${symbol} candles → Stooq`);
-            return candles;
-        }
-
-        // CoinGecko — crypto OHLCV with volume
-        candles = await fetchCandlesCoinGecko(symbol, days);
-        if (candles) {
-            console.log(`[Data] ✅ ${symbol} candles → CoinGecko`);
-            return candles;
-        }
-
-        // Binance — crypto, no key
-        candles = await fetchCandlesBinance(symbol, days);
-        if (candles) {
-            console.log(`[Data] ✅ ${symbol} candles → Binance`);
-            return candles;
-        }
-
-        // Finnhub last resort
-        candles = await fetchCandlesFinnhub(symbol, days);
-        if (candles) {
-            console.log(`[Data] ✅ ${symbol} candles → Finnhub`);
-            return candles;
-        }
-
-        console.warn(`[Data] ❌ No candle data for ${symbol} from any source`);
-        return null;
+    return withFallback({
+        cache,
+        key: `candles:${symbol}:${resolution}:${days}`,
+        ttl: 60_000,
+        providers: [
+            { name: 'yahoo', run: () => fetchCandlesYahoo(symbol, days) },
+            { name: 'twelvedata', run: () => providers.twelveDataCandles(symbol, days) },
+            { name: 'massive', run: () => providers.massiveCandles(symbol, days) },
+            { name: 'stooq', run: () => fetchCandlesStooq(symbol, days) },
+            { name: 'coingecko', run: () => fetchCandlesCoinGecko(symbol, days) },
+            { name: 'binance', run: () => fetchCandlesBinance(symbol, days) },
+            { name: 'finnhub', run: () => fetchCandlesFinnhub(symbol, days) },
+        ],
     });
 }
 
@@ -506,61 +483,45 @@ async function fetchCandles(symbol, resolution = 'D', days = 90) {
  * Chain: Yahoo 1wk → Stooq weekly → AlphaVantage weekly
  */
 async function fetchWeeklyCandles(symbol, weeks = 52) {
-    return cache.getOrFetch(`candles:${symbol}:W:${weeks}`, async () => {
-        let candles = await fetchWeeklyCandlesYahoo(symbol, weeks);
-        if (candles) {
-            console.log(`[Data] ✅ ${symbol} weekly candles → Yahoo`);
-            return candles;
-        }
-
-        candles = await fetchWeeklyCandlesStooq(symbol, weeks);
-        if (candles) {
-            console.log(`[Data] ✅ ${symbol} weekly candles → Stooq`);
-            return candles;
-        }
-
-        candles = await fetchWeeklyCandlesAlphaVantage(symbol);
-        if (candles) {
-            console.log(`[Data] ✅ ${symbol} weekly candles → Alpha Vantage`);
-            return candles;
-        }
-
-        return null;
-    }, 300_000); // 5 min cache for weekly data
+    return withFallback({
+        cache,
+        key: `candles:${symbol}:W:${weeks}`,
+        ttl: 300_000, // 5 min cache for weekly data
+        providers: [
+            { name: 'yahoo', run: () => fetchWeeklyCandlesYahoo(symbol, weeks) },
+            { name: 'twelvedata', run: () => providers.twelveDataWeekly(symbol, weeks) },
+            { name: 'stooq', run: () => fetchWeeklyCandlesStooq(symbol, weeks) },
+            { name: 'massive', run: () => providers.massiveWeekly(symbol, weeks) },
+            { name: 'alphavantage', run: () => fetchWeeklyCandlesAlphaVantage(symbol) },
+        ],
+    });
 }
 
 /**
  * Fetch current quote with multi-source fallback.
  */
 async function fetchQuote(symbol) {
-    return cache.getOrFetch(`quote:${symbol}`, async () => {
-        // Try Yahoo first
-        let quote = await fetchQuoteYahoo(symbol);
-        if (quote) return quote;
-
-        // Try Finnhub as fallback
-        try {
-            await finnhubLimiter.waitForToken();
-            const { data } = await axios.get(`${FINNHUB_BASE}/quote`, {
-                params: { symbol, token: config.finnhubKey },
-            });
-            if (data && data.c !== 0) {
-                return {
-                    current: data.c,
-                    high: data.h,
-                    low: data.l,
-                    open: data.o,
-                    prevClose: data.pc,
-                    change: data.d,
-                    changePercent: data.dp,
-                };
-            }
-        } catch (err) {
-            console.error(`[Finnhub] Quote fetch failed for ${symbol}:`, err.message);
-        }
-
-        return null;
-    }, 30_000);
+    return withFallback({
+        cache,
+        key: `quote:${symbol}`,
+        ttl: 30_000,
+        providers: [
+            { name: 'yahoo', run: () => fetchQuoteYahoo(symbol) },
+            { name: 'twelvedata', run: () => providers.twelveDataQuote(symbol) },
+            { name: 'massive', run: () => providers.massiveQuote(symbol) },
+            { name: 'finnhub', run: async () => {
+                await finnhubLimiter.waitForToken();
+                const { data } = await axios.get(`${FINNHUB_BASE}/quote`, {
+                    params: { symbol, token: config.finnhubKey }, timeout: 8000,
+                });
+                if (data && data.c !== 0) {
+                    return { current: data.c, high: data.h, low: data.l, open: data.o, prevClose: data.pc, change: data.d, changePercent: data.dp };
+                }
+                return null;
+            } },
+            { name: 'exchangerate', run: () => providers.exchangeRateQuote(symbol) },
+        ],
+    });
 }
 
 /**

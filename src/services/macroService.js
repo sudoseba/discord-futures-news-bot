@@ -4,6 +4,7 @@ const axios = require('axios');
 const config = require('../config');
 const Cache = require('../utils/cache');
 const { finnhubLimiter } = require('../utils/rateLimiter');
+const withFallback = require('../utils/withFallback');
 
 const cache = new Cache(120_000); // 2 min TTL for macro data
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
@@ -44,13 +45,18 @@ async function fetchMacroQuote(key) {
  * @returns {Promise<{dxy: object|null, tnx: object|null, vix: object|null}>}
  */
 async function fetchInstitutionalKeys() {
-    return cache.getOrFetch('macro:institutional_keys', async () => {
-        const [dxy, tnx, vix] = await Promise.all([
-            fetchMacroQuote('DXY'),
-            fetchMacroQuote('TNX'),
-            fetchMacroQuote('VIX'),
-        ]);
-        return { dxy, tnx, vix };
+    // Per-instrument fallback so a transient Yahoo blip serves last-good instead
+    // of blanking all three (macro has no alternate free provider today).
+    const [dxy, tnx, vix] = await Promise.all([macroKey('DXY'), macroKey('TNX'), macroKey('VIX')]);
+    return { dxy, tnx, vix };
+}
+
+function macroKey(key) {
+    return withFallback({
+        cache,
+        key: `macro:${key}`,
+        ttl: 120_000,
+        providers: [{ name: 'yahoo-macro', run: () => fetchMacroQuote(key) }],
     });
 }
 

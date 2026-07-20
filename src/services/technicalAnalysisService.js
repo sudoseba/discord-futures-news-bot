@@ -222,6 +222,29 @@ function analyze(candles) {
 
     const divergence = detectDivergence(closes, rsiValues);
 
+    // Volume analysis (skipped for volume-less feeds like spot FX, where all zeros).
+    let volume = null;
+    const volumes = Array.isArray(candles) ? null : candles.volume;
+    if (volumes && volumes.length >= 10) {
+        const valid = volumes.filter((v) => Number.isFinite(v) && v > 0);
+        if (valid.length >= 10) {
+            const last = valid[valid.length - 1];
+            const recent = valid.slice(-20);
+            const avg = recent.reduce((s, v) => s + v, 0) / recent.length;
+            const ratio = avg > 0 ? last / avg : null;
+            const l5 = valid.slice(-5);
+            const p5 = valid.slice(-10, -5);
+            const l5avg = l5.reduce((s, v) => s + v, 0) / l5.length;
+            const p5avg = p5.length ? p5.reduce((s, v) => s + v, 0) / p5.length : l5avg;
+            const trend = l5avg > p5avg * 1.1 ? 'rising' : l5avg < p5avg * 0.9 ? 'falling' : 'flat';
+            const surge = !!(ratio && ratio >= 1.5);
+            volume = {
+                last, avg20: Math.round(avg), ratio: ratio ? +ratio.toFixed(2) : null, trend, surge,
+                label: surge ? '🔊 Above-average' : ratio && ratio < 0.6 ? '🔈 Light' : 'Normal',
+            };
+        }
+    }
+
     // Risk metrics (ATR + Expected Move + Vol Regime). Guard against zero or
     // non-finite current price — otherwise expectedMovePercent becomes Infinity
     // and the embed renders "Infinity%".
@@ -261,6 +284,7 @@ function analyze(candles) {
         trendSignal,
         divergence,
         riskMetrics,
+        volume,
     };
 }
 

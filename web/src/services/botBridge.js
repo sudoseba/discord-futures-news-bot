@@ -130,9 +130,13 @@ async function analyze(sym) {
   ensure();
   const key = resolve(sym);
   if (!key) throw notFound(sym);
-  const [candles, q] = await Promise.all([svc.market.fetchCandles(key, 'D', 90), svc.market.fetchQuote(key)]);
+  const [candles, q, cot] = await Promise.all([
+    svc.market.fetchCandles(key, 'D', 90),
+    svc.market.fetchQuote(key),
+    svc.macro.fetchCotForSymbol(key).catch(() => null),
+  ]);
   if (!candles) throw new Error(`no candle data for ${meta(key)?.name || key}`);
-  return { symbol: key, meta: meta(key), quote: q, analysis: svc.ta.analyze(candles), levels: svc.ta.detectLevels(candles) };
+  return { symbol: key, meta: meta(key), quote: q, analysis: svc.ta.analyze(candles), levels: svc.ta.detectLevels(candles), cot };
 }
 
 async function chartData(sym, opts = {}) {

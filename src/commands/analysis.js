@@ -2,7 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const config = require('../config');
 const { fetchCandles, fetchQuote } = require('../services/marketDataService');
 const { analyze } = require('../services/technicalAnalysisService');
-const { fetchInstitutionalKeys, generateCorrelationNotes, fetchEconomicCalendar } = require('../services/macroService');
+const { fetchInstitutionalKeys, generateCorrelationNotes, fetchEconomicCalendar, fetchCotForSymbol } = require('../services/macroService');
 const { generateWarRoomVerdict } = require('../services/llmService');
 const { buildAnalysisEmbed } = require('../utils/embeds');
 
@@ -32,11 +32,12 @@ module.exports = {
             const meta = config.watchlist[symbol] || { name: symbol, emoji: '📊' };
 
             // Fetch everything in parallel
-            const [candles, quote, macro, calendar] = await Promise.all([
+            const [candles, quote, macro, calendar, cot] = await Promise.all([
                 fetchCandles(symbol, config.analysis.candleResolution, config.analysis.candleDays),
                 fetchQuote(symbol),
                 fetchInstitutionalKeys(),
                 fetchEconomicCalendar(),
+                fetchCotForSymbol(symbol).catch(() => null),
             ]);
 
             if (!candles || !candles.close || candles.close.length < 50) {
@@ -73,6 +74,7 @@ module.exports = {
                 correlationNotes,
                 calendar,
                 verdict,
+                cot,
             });
 
             await interaction.editReply({ embeds: [embed] });

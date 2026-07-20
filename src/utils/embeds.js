@@ -152,7 +152,7 @@ function buildNewsEmbed(headlines, category = 'all', tldr = null, headlineTldrs 
  * @returns {EmbedBuilder}
  */
 function buildAnalysisEmbed(symbol, name, analysis, quote, extras = {}) {
-    const { macro, correlationNotes, calendar, verdict } = extras;
+    const { macro, correlationNotes, calendar, verdict, cot } = extras;
 
     const isBullish = analysis.rsi && analysis.rsi < 50;
     const color = analysis.divergence?.type === 'bullish' ? COLORS.bullish
@@ -210,6 +210,16 @@ function buildAnalysisEmbed(symbol, name, analysis, quote, extras = {}) {
         });
     }
 
+    // ─── Volume ───────────────────────────────────────────────────
+    if (analysis.volume) {
+        const v = analysis.volume;
+        embed.addFields({
+            name: '🔊 Volume',
+            value: `${v.label}${v.ratio ? ` (${v.ratio}× 20d avg)` : ''}\nTrend: ${v.trend}`,
+            inline: true,
+        });
+    }
+
     // ─── Divergence ───────────────────────────────────────────────
     if (analysis.divergence && analysis.divergence.type !== 'none') {
         const divEmoji = analysis.divergence.type === 'bullish' ? '🟢' : '🔴';
@@ -252,6 +262,17 @@ function buildAnalysisEmbed(symbol, name, analysis, quote, extras = {}) {
         embed.addFields({
             name: '⚡ RISK METRICS',
             value: `ATR(14): **${rm.atr}** pts (avg: ${rm.atrAvg})\nExpected Move: **±$${rm.expectedMove}** (${rm.expectedMovePercent}%)\nRegime: ${rm.regimeEmoji} **${rm.regime}** Volatility`,
+            inline: false,
+        });
+    }
+
+    // ─── COT Positioning (Commitment of Traders) ─────────────────
+    if (cot) {
+        const fmt = (n) => (n == null || !Number.isFinite(Number(n)) ? '—' : Number(n).toLocaleString());
+        const wk = Number.isFinite(Number(cot.commercialChange)) ? ` (${cot.commercialChange >= 0 ? '+' : ''}${fmt(cot.commercialChange)} wk)` : '';
+        embed.addFields({
+            name: '🏦 COT POSITIONING',
+            value: `${cot.sentimentEmoji || ''} **${cot.sentiment || '—'}**\nCommercials: ${fmt(cot.commercialNet)} net${wk}\nLarge specs: ${fmt(cot.speculatorNet)} net${cot.reportDate ? `\n_report ${cot.reportDate}_` : ''}`,
             inline: false,
         });
     }

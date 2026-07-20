@@ -1,7 +1,10 @@
 const Cerebras = require('@cerebras/cerebras_cloud_sdk');
+const GroqSDK = require('groq-sdk');
+const Groq = GroqSDK.Groq || GroqSDK.default || GroqSDK;
 const config = require('../config');
 const memory = require('./memoryService');
 const Cache = require('../utils/cache');
+const { recordSuccess, recordFailure } = require('../utils/circuitBreaker');
 
 // ─── LLM Output Cache ───────────────────────────────────────────────────────
 // Deduplicates AI generation so two users asking the same thing within the
@@ -10,12 +13,56 @@ const Cache = require('../utils/cache');
 const llmCache = new Cache(config.llmCacheTtl);
 
 let cerebrasClient = null;
+let groqClient = null;
+let llmClient = null;
 
-function getClient() {
-    if (!cerebrasClient && config.cerebrasApiKey) {
-        cerebrasClient = new Cerebras({ apiKey: config.cerebrasApiKey });
-    }
+function rawCerebras() {
+    if (!cerebrasClient && config.cerebrasApiKey) cerebrasClient = new Cerebras({ apiKey: config.cerebrasApiKey });
     return cerebrasClient;
+}
+function rawGroq() {
+    if (!groqClient && config.groqApiKey) groqClient = new Groq({ apiKey: config.groqApiKey });
+    return groqClient;
+}
+
+/**
+ * OpenAI-compatible client with Cerebras→Groq failover. Presents the same
+ * `.chat.completions.create(params)` interface the callers already use, so every
+ * generation function transparently gains a second LLM provider — including on
+ * the "200 but empty content" case that used to silently fail.
+ */
+function getClient() {
+    if (!config.cerebrasApiKey && !config.groqApiKey) return null;
+    if (!llmClient) llmClient = { chat: { completions: { create: createWithFailover } } };
+    return llmClient;
+}
+
+async function createWithFailover(params) {
+    const cerebras = rawCerebras();
+    if (cerebras) {
+        try {
+            const completion = await cerebras.chat.completions.create(params);
+            if (completion?.choices?.[0]?.message?.content) { recordSuccess('cerebras-llm'); return completion; }
+            recordFailure('cerebras-llm', 'empty content');
+            console.warn('[LLM] Cerebras returned empty content — failing over to Groq');
+        } catch (err) {
+            recordFailure('cerebras-llm', err.message);
+            console.warn(`[LLM] Cerebras error (${err.message}) — failing over to Groq`);
+        }
+    }
+    const groq = rawGroq();
+    if (groq) {
+        try {
+            const completion = await groq.chat.completions.create({ ...params, model: config.groqModel });
+            recordSuccess('groq-llm');
+            return completion;
+        } catch (err) {
+            recordFailure('groq-llm', err.message);
+            console.error(`[LLM] Groq failover also failed: ${err.message}`);
+        }
+    }
+    // Nothing worked — return an empty completion so callers take their degrade path.
+    return { choices: [{ message: { content: '' } }] };
 }
 
 /**
