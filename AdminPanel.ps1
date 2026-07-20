@@ -270,7 +270,8 @@ function Run-ApiTest([string]$Id) {
                 $k = Get-FieldValue 'CEREBRAS_API_KEY'
                 if (-not $k) { $msg = 'No key set'; break }
                 $model = Get-FieldValue 'CEREBRAS_MODEL'; if (-not $model) { $model = 'gpt-oss-120b' }
-                $payload = @{ model=$model; messages=@(@{ role='user'; content='Reply with the single word: pong' }); max_tokens=10; temperature=0 } | ConvertTo-Json -Depth 6
+                # 256 tokens: gpt-oss is a reasoning model — a tiny max_tokens is fully consumed by reasoning, leaving empty content.
+                $payload = @{ model=$model; messages=@(@{ role='user'; content='Reply with the single word: pong' }); max_tokens=256; temperature=0 } | ConvertTo-Json -Depth 6
                 $r = Invoke-Http -Url 'https://api.cerebras.ai/v1/chat/completions' -Method POST -Headers @{ Authorization = "Bearer $k" } -Body $payload -ContentType 'application/json' -TimeoutSec 20
                 if ($r.Ok) {
                     $j = $r.Body | ConvertFrom-Json

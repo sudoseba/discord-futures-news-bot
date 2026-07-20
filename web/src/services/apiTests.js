@@ -84,7 +84,7 @@ async function runTest(id) {
         const r = await http('https://api.cerebras.ai/v1/chat/completions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${env.CEREBRAS_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with the single word: pong' }], max_tokens: 10, temperature: 0 }),
+          body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with the single word: pong' }], max_tokens: 256, temperature: 0 }),
           timeoutMs: 20000,
         });
         const content = r.json?.choices?.[0]?.message?.content;

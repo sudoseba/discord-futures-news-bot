@@ -284,7 +284,9 @@ async function runApiTest(id) {
         const k = effective('CEREBRAS_API_KEY');
         if (!k) { msg = 'No key set'; break; }
         const model = effective('CEREBRAS_MODEL') || 'gpt-oss-120b';
-        const payload = JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with the single word: pong' }], max_tokens: 10, temperature: 0 });
+        // 256 tokens: gpt-oss is a reasoning model — a tiny max_tokens gets fully
+        // consumed by reasoning, leaving empty content (finish_reason "length").
+        const payload = JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with the single word: pong' }], max_tokens: 256, temperature: 0 });
         const r = await httpRequest({ url: 'https://api.cerebras.ai/v1/chat/completions', method: 'POST', headers: { Authorization: `Bearer ${k}` }, body: payload, contentType: 'application/json', timeoutMs: 20000 });
         if (r.ok) {
           const j = parseJson(r.body) || {};
