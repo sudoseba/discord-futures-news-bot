@@ -33,6 +33,8 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const os = require('os');
+const crypto = require('crypto');
 const readline = require('readline');
 const { spawn, spawnSync } = require('child_process');
 
@@ -457,7 +459,9 @@ function webInstalled() {
 }
 function webEnvVal(key, def) {
   try {
-    const m = fs.readFileSync(path.join(WEB_DIR, '.env'), 'utf8').match(new RegExp('^\\s*' + key + '\\s*=\\s*(\\S+)', 'm'));
+    // [ \t] (not \s) so an empty "KEY=" doesn't skip the newline and grab the
+    // next line's value.
+    const m = fs.readFileSync(path.join(WEB_DIR, '.env'), 'utf8').match(new RegExp('^[ \\t]*' + key + '[ \\t]*=[ \\t]*(\\S+)', 'm'));
     if (m) return m[1];
   } catch { /* no web/.env */ }
   return def;
@@ -835,10 +839,88 @@ async function controlMenu() {
   }
 }
 
+function detectIp() {
+  try {
+    const r = spawnSync('tailscale', ['ip', '-4'], { encoding: 'utf8', timeout: 2500 });
+    const ip = (r.stdout || '').trim().split('\n')[0].trim();
+    if (r.status === 0 && ip) return ip;
+  } catch { /* no tailscale */ }
+  try {
+    for (const ifs of Object.values(os.networkInterfaces())) {
+      for (const i of ifs || []) {
+        if (i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254.')) return i.address;
+      }
+    }
+  } catch { /* */ }
+  return 'localhost';
+}
+
+/** Upsert keys into web/.env (uncomments a commented placeholder if present). */
+function setWebEnv(updates) {
+  const p = path.join(WEB_DIR, '.env');
+  const lines = fs.existsSync(p) ? fs.readFileSync(p, 'utf8').split(/\r?\n/) : [];
+  for (const [k, v] of Object.entries(updates)) {
+    const rx = new RegExp('^\\s*#?\\s*' + k + '\\s*=');
+    let found = false;
+    for (let i = 0; i < lines.length; i++) { if (rx.test(lines[i])) { lines[i] = `${k}=${v}`; found = true; break; } }
+    if (!found) lines.push(`${k}=${v}`);
+  }
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
+  fs.writeFileSync(p, lines.join('\n') + '\n', 'utf8');
+}
+
+async function webSetup() {
+  const ownRl = !rl;
+  if (ownRl) makeRl();
+  console.log(bold('\n  Web dashboard — guided setup'));
+  console.log(dim('  Installs deps, creates web/.env, and configures the basics.\n'));
+
+  // 1) dependencies
+  if (!fs.existsSync(path.join(WEB_DIR, 'node_modules'))) {
+    console.log(cyan('  Installing web dependencies (compiles better-sqlite3 — a few minutes)...\n'));
+    const hasLock = fs.existsSync(path.join(WEB_DIR, 'package-lock.json'));
+    const r = spawnSync('npm', hasLock ? ['ci', '--omit=dev'] : ['install', '--omit=dev'], { cwd: WEB_DIR, stdio: 'inherit' });
+    if (r.status !== 0) { console.log(red('\n  npm install failed — see output above. Fix and re-run setup.')); if (ownRl) rl.close(); return; }
+    console.log(green('\n  Dependencies installed.'));
+  } else {
+    console.log(dim('  Dependencies already installed — skipping npm.'));
+  }
+
+  // 2) web/.env
+  const webEnvPath = path.join(WEB_DIR, '.env');
+  if (!fs.existsSync(webEnvPath)) {
+    const ex = path.join(WEB_DIR, '.env.example');
+    if (fs.existsSync(ex)) fs.copyFileSync(ex, webEnvPath); else fs.writeFileSync(webEnvPath, '');
+    console.log(green('  Created web/.env.'));
+  }
+
+  // 3) prompts (keep an existing secret so sessions survive re-runs)
+  const secret = webEnvVal('SESSION_SECRET', '') || crypto.randomBytes(48).toString('base64url');
+  const defUrl = `http://${detectIp()}:8080`;
+  console.log('');
+  const url = (await ask(`  Public URL for the dashboard [${defUrl}]: `)).trim() || defUrl;
+  const admin = (await ask('  Your Discord user ID (admin access; blank to skip): ')).trim();
+  const dev = (await ask('  Enable quick DEV_AUTH login (no Discord, local preview)? [y/N]: ')).trim().toLowerCase().startsWith('y');
+
+  const updates = { SESSION_SECRET: secret, WEB_PUBLIC_URL: url };
+  if (admin) updates.ADMIN_USER_IDS = admin;
+  if (dev) updates.DEV_AUTH = '1';
+  setWebEnv(updates);
+  console.log(green('\n  web/.env configured.'));
+  if (!dev && !url.startsWith('https')) {
+    console.log(yellow(`  ⚠ For real Discord login, add this redirect in the Discord Developer Portal (OAuth2 → Redirects):`));
+    console.log(`     ${url}/auth/callback`);
+  }
+
+  const go = (await ask('\n  Start the web dashboard now? [Y/n]: ')).trim().toLowerCase();
+  if (go === '' || go.startsWith('y')) webStart();
+  if (ownRl) rl.close();
+}
+
 async function webMenu() {
   for (;;) {
     await printWebStatus();
-    console.log('   1) Start     2) Stop     3) Restart     4) Logs     5) Refresh     b) Back');
+    console.log('   1) Start     2) Stop     3) Restart     4) Logs     5) Refresh     6) Setup (deps + config)     b) Back');
     const a = (await ask('\n  > ')).trim().toLowerCase();
     if (a === 'b' || a === '') return;
     if (a === '1') webControl('start');
@@ -846,6 +928,7 @@ async function webMenu() {
     else if (a === '3') webControl('restart');
     else if (a === '4') { webLogs(200); await ask(dim('\n  (enter to continue) ')); }
     else if (a === '5') { /* loop reprints status */ }
+    else if (a === '6') await webSetup();
     else console.log(red('  Not a valid choice.'));
   }
 }
@@ -884,7 +967,7 @@ One-shot subcommands:
   status                              service + /healthz summary
   health                              print /healthz JSON view
   start | stop | restart              control the bot
-  web <status|start|stop|restart|logs>  control the web dashboard service
+  web <setup|status|start|stop|restart|logs>  set up / control the web dashboard
   logs [--follow|-f] [N]              show (or follow) bot logs
   test <api> | test-all              run API connectivity tests
   deploy                              register slash commands
@@ -941,6 +1024,7 @@ async function cli(argv) {
     case 'web': {
       const action = rest[0] || 'status';
       if (action === 'status') await printWebStatus();
+      else if (action === 'setup') await webSetup();
       else if (['start', 'stop', 'restart'].includes(action)) webControl(action);
       else if (action === 'logs') {
         if (rest.includes('-f') || rest.includes('--follow')) {
